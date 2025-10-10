@@ -197,6 +197,26 @@ Be conversational and helpful. Always confirm actions before making changes to f
   clearHistory(userId: string): void {
     this.conversationHistory.delete(userId);
   }
+
+  async summarizeArticle(userId: string, prompt: string): Promise<string> {
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4-turbo-preview',
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a helpful assistant that creates clear, concise summaries of articles. Focus on the main points, key arguments, and important details. Format your summaries in a readable way with bullet points or paragraphs as appropriate.'
+        },
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      temperature: 0.7,
+      max_tokens: 1000
+    });
+
+    return response.choices[0].message.content || 'Could not generate summary.';
+  }
 }
 
 export const gptService = new GPTService();

@@ -132,6 +132,41 @@ export class GoogleDriveService {
     const drive = google.drive({ version: 'v3', auth });
     await drive.files.delete({ fileId });
   }
+
+  async appendToFile(auth: OAuth2Client, fileName: string, content: string): Promise<DriveFile> {
+    const drive = google.drive({ version: 'v3', auth });
+    
+    const searchResponse = await drive.files.list({
+      q: `name = '${fileName.replace(/'/g, "\\'")}' and trashed = false`,
+      pageSize: 1,
+      fields: 'files(id, name, mimeType)'
+    });
+    
+    let fileId: string;
+    let existingContent = '';
+    
+    if (searchResponse.data.files && searchResponse.data.files.length > 0) {
+      fileId = searchResponse.data.files[0].id!;
+      existingContent = await this.getFileContent(auth, fileId);
+    } else {
+      const newFile = await this.createFile(auth, {
+        name: fileName,
+        content: '',
+        mimeType: 'text/plain'
+      });
+      fileId = newFile.id;
+    }
+    
+    const updatedContent = existingContent 
+      ? `${existingContent}\n\n${content}` 
+      : content;
+    
+    return await this.editFile(auth, {
+      fileId,
+      content: updatedContent,
+      mimeType: 'text/plain'
+    });
+  }
 }
 
 export const googleDriveService = new GoogleDriveService();

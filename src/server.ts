@@ -1,10 +1,17 @@
 import express, { Request, Response } from 'express';
 import cookieSession from 'cookie-session';
+import cors from 'cors';
 import { googleAuthService } from './services/googleAuth';
 import { tokenStorage } from './services/tokenStorage';
 import { gptService } from './services/gptService';
+import { googleDriveService } from './services/googleDrive';
 
 const app = express();
+
+app.use(cors({
+  origin: true,
+  credentials: true
+}));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -185,6 +192,58 @@ app.get('/api/status', async (req: Request, res: Response) => {
     });
   } else {
     res.json({ authenticated: false });
+  }
+});
+
+app.post('/api/summarize-article', async (req: Request, res: Response) => {
+  try {
+    if (!req.session?.userId) {
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
+
+    const { title, url, content, targetFile, scrollPercentage } = req.body;
+    
+    if (!title || !content || !targetFile) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const summaryPrompt = `Please provide a concise summary of the following article content. The user has read ${Math.round(scrollPercentage || 100)}% of this article.
+
+Title: ${title}
+URL: ${url}
+
+Content:
+${content}
+
+Provide a clear, structured summary that captures the key points and main ideas.`;
+
+    const summary = await gptService.summarizeArticle(req.session.userId, summaryPrompt);
+    
+    const timestamp = new Date().toISOString();
+    const formattedEntry = `
+========================================
+Date: ${timestamp}
+Title: ${title}
+URL: ${url}
+Read: ${Math.round(scrollPercentage || 100)}%
+
+Summary:
+${summary}
+========================================
+`;
+
+    const auth = await googleAuthService.getAuthenticatedClient(req.session.userId);
+    const result = await googleDriveService.appendToFile(auth, targetFile, formattedEntry);
+    
+    res.json({ 
+      success: true,
+      summary,
+      file: result
+    });
+  } catch (error) {
+    console.error('Article summarization error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    res.status(500).json({ error: errorMessage });
   }
 });
 
