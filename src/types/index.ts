@@ -48,3 +48,29 @@ export interface MCPResponse {
   error?: string;
 }
 
+export interface SheetFormat {
+  sheetId: string;
+  sheetName: string;
+  headers: string[];
+  columnCount: number;
+  rowCount: number;
+  dataTypes: Record<string, string>;
+  exampleRows: any[][];
+}
+
+export interface DocFormat {
+  style: string;
+  structure: string;
+  avgLength: number;
+  hasBullets: boolean;
+  hasHeadings: boolean;
+  exampleEntries: string[];
+}
+
+export interface FormatAnalysis {
+  fileType: 'sheet' | 'doc' | 'text';
+  isEmpty: boolean;
+  sheetFormat?: SheetFormat;
+  docFormat?: DocFormat;
+}
+

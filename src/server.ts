@@ -1,6 +1,7 @@
 import express, { Request, Response } from 'express';
 import cookieSession from 'cookie-session';
 import cors from 'cors';
+import { google } from 'googleapis';
 import { googleAuthService } from './services/googleAuth';
 import { tokenStorage } from './services/tokenStorage';
 import { gptService } from './services/gptService';
@@ -207,7 +208,47 @@ app.post('/api/summarize-article', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    const summaryPrompt = `Please provide a concise summary of the following article content. The user has read ${Math.round(scrollPercentage || 100)}% of this article.
+    const auth = await googleAuthService.getAuthenticatedClient(req.session.userId);
+    
+    const formatAnalysis = await googleDriveService.analyzeFileFormat(auth, targetFile);
+    
+    if (formatAnalysis.fileType === 'sheet' && formatAnalysis.sheetFormat) {
+      const sheetFormat = formatAnalysis.sheetFormat;
+      
+      const extractedData = await gptService.extractForSheet(
+        title,
+        url,
+        content,
+        scrollPercentage || 100,
+        sheetFormat
+      );
+      
+      const drive = google.drive({ version: 'v3', auth });
+      const searchResponse = await drive.files.list({
+        q: `name = '${targetFile.replace(/'/g, "\\'")}' and trashed = false`,
+        pageSize: 1,
+        fields: 'files(id)'
+      });
+      
+      if (searchResponse.data.files && searchResponse.data.files.length > 0) {
+        const fileId = searchResponse.data.files[0].id!;
+        await googleDriveService.appendToSheet(auth, fileId, extractedData);
+        
+        res.json({ 
+          success: true,
+          fileType: 'sheet',
+          extractedData,
+          message: 'Data added to sheet'
+        });
+      } else {
+        res.status(404).json({ error: 'Sheet not found' });
+      }
+    } else if (formatAnalysis.fileType === 'doc' && formatAnalysis.docFormat) {
+      const docFormat = formatAnalysis.docFormat;
+      
+      let summary: string;
+      if (formatAnalysis.isEmpty) {
+        const summaryPrompt = `Please provide a concise summary of the following article content. The user has read ${Math.round(scrollPercentage || 100)}% of this article.
 
 Title: ${title}
 URL: ${url}
@@ -217,10 +258,63 @@ ${content}
 
 Provide a clear, structured summary that captures the key points and main ideas.`;
 
-    const summary = await gptService.summarizeArticle(req.session.userId, summaryPrompt);
-    
-    const timestamp = new Date().toISOString();
-    const formattedEntry = `
+        summary = await gptService.summarizeArticle(req.session.userId, summaryPrompt);
+        
+        const timestamp = new Date().toISOString();
+        summary = `========================================
+Date: ${timestamp}
+Title: ${title}
+URL: ${url}
+Read: ${Math.round(scrollPercentage || 100)}%
+
+Summary:
+${summary}
+========================================`;
+      } else {
+        summary = await gptService.summarizeForDoc(
+          title,
+          url,
+          content,
+          scrollPercentage || 100,
+          docFormat
+        );
+      }
+      
+      const drive = google.drive({ version: 'v3', auth });
+      const searchResponse = await drive.files.list({
+        q: `name = '${targetFile.replace(/'/g, "\\'")}' and trashed = false`,
+        pageSize: 1,
+        fields: 'files(id)'
+      });
+      
+      if (searchResponse.data.files && searchResponse.data.files.length > 0) {
+        const fileId = searchResponse.data.files[0].id!;
+        await googleDriveService.appendToDoc(auth, fileId, summary);
+        
+        res.json({ 
+          success: true,
+          fileType: 'doc',
+          summary,
+          message: 'Summary added to document'
+        });
+      } else {
+        res.status(404).json({ error: 'Document not found' });
+      }
+    } else {
+      const summaryPrompt = `Please provide a concise summary of the following article content. The user has read ${Math.round(scrollPercentage || 100)}% of this article.
+
+Title: ${title}
+URL: ${url}
+
+Content:
+${content}
+
+Provide a clear, structured summary that captures the key points and main ideas.`;
+
+      const summary = await gptService.summarizeArticle(req.session.userId, summaryPrompt);
+      
+      const timestamp = new Date().toISOString();
+      const formattedEntry = `
 ========================================
 Date: ${timestamp}
 Title: ${title}
@@ -232,14 +326,15 @@ ${summary}
 ========================================
 `;
 
-    const auth = await googleAuthService.getAuthenticatedClient(req.session.userId);
-    const result = await googleDriveService.appendToFile(auth, targetFile, formattedEntry);
-    
-    res.json({ 
-      success: true,
-      summary,
-      file: result
-    });
+      const result = await googleDriveService.appendToFile(auth, targetFile, formattedEntry);
+      
+      res.json({ 
+        success: true,
+        fileType: 'text',
+        summary,
+        file: result
+      });
+    }
   } catch (error) {
     console.error('Article summarization error:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';

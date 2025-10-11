@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import { googleAuthService } from './googleAuth';
 import { googleDriveService } from './googleDrive';
+import { FormatAnalysis, SheetFormat, DocFormat } from '../types';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -216,6 +217,152 @@ Be conversational and helpful. Always confirm actions before making changes to f
     });
 
     return response.choices[0].message.content || 'Could not generate summary.';
+  }
+
+  async extractForSheet(
+    articleTitle: string,
+    articleUrl: string,
+    articleContent: string,
+    scrollPercentage: number,
+    sheetFormat: SheetFormat
+  ): Promise<any[]> {
+    const prompt = `You are extracting information from an article to fill a Google Sheet row.
+
+Article Details:
+- Title: ${articleTitle}
+- URL: ${articleUrl}
+- Read Progress: ${Math.round(scrollPercentage)}%
+
+Content:
+${articleContent}
+
+Sheet Format:
+- Columns: ${sheetFormat.headers.join(', ')}
+- Column Data Types: ${JSON.stringify(sheetFormat.dataTypes)}
+${sheetFormat.exampleRows.length > 0 ? `- Example rows: ${JSON.stringify(sheetFormat.exampleRows)}` : ''}
+
+Instructions:
+1. Extract ONLY the information needed for each column
+2. Match the data types specified
+3. Follow the format of example rows if provided
+4. Return a JSON array with values in the exact order of the columns
+5. If a column's data is not available in the article, use an appropriate empty/default value
+
+Return ONLY a JSON array, no other text.`;
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4-turbo-preview',
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a data extraction assistant. You extract specific information from articles to populate spreadsheet rows. Always return valid JSON arrays.'
+        },
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      temperature: 0.3,
+      max_tokens: 500
+    });
+
+    const content = response.choices[0].message.content || '[]';
+    try {
+      const parsed = JSON.parse(content);
+      return Array.isArray(parsed[0]) ? parsed[0] : parsed;
+    } catch (e) {
+      const match = content.match(/\[.*\]/s);
+      if (match) {
+        const parsed = JSON.parse(match[0]);
+        return Array.isArray(parsed[0]) ? parsed[0] : parsed;
+      }
+      return sheetFormat.headers.map(() => '');
+    }
+  }
+
+  async summarizeForDoc(
+    articleTitle: string,
+    articleUrl: string,
+    articleContent: string,
+    scrollPercentage: number,
+    docFormat: DocFormat
+  ): Promise<string> {
+    const styleGuidance = this.getStyleGuidance(docFormat);
+    const structureGuidance = this.getStructureGuidance(docFormat);
+    
+    const prompt = `You are creating a summary entry for a Google Doc that already has existing content.
+
+Article Details:
+- Title: ${articleTitle}
+- URL: ${articleUrl}
+- Read Progress: ${Math.round(scrollPercentage)}%
+
+Content:
+${articleContent}
+
+Existing Doc Format Analysis:
+- Writing Style: ${docFormat.style}
+- Structure: ${docFormat.structure}
+- Average Entry Length: ${Math.round(docFormat.avgLength)} characters
+- Uses Bullet Points: ${docFormat.hasBullets}
+- Uses Headings: ${docFormat.hasHeadings}
+
+Example of existing entries:
+${docFormat.exampleEntries.slice(0, 2).join('\n---\n')}
+
+Instructions:
+${styleGuidance}
+${structureGuidance}
+- Match the length and detail level of existing entries (around ${Math.round(docFormat.avgLength)} characters)
+- Maintain consistency with the existing writing style
+
+Create a summary entry that fits seamlessly with the existing content.`;
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4-turbo-preview',
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a writing assistant that creates summaries matching a specific style and format. You analyze existing content patterns and replicate them precisely.'
+        },
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      temperature: 0.7,
+      max_tokens: 1000
+    });
+
+    return response.choices[0].message.content || 'Could not generate summary.';
+  }
+
+  private getStyleGuidance(docFormat: DocFormat): string {
+    switch (docFormat.style) {
+      case 'bullet_points':
+        return '- Use bullet points to organize the information';
+      case 'heading_based':
+        return '- Use headings to structure the content';
+      case 'multi_paragraph':
+        return '- Write in multiple paragraphs, breaking down different aspects';
+      case 'single_paragraph':
+        return '- Write in a single, cohesive paragraph';
+      default:
+        return '- Match the writing style of the example entries';
+    }
+  }
+
+  private getStructureGuidance(docFormat: DocFormat): string {
+    switch (docFormat.structure) {
+      case 'separated_entries':
+        return '- Include a separator line (==== or ----) and timestamp\n- Follow the structured format with Date, Title, URL, and Summary sections';
+      case 'structured_entries':
+        return '- Use labeled sections like "Title:", "URL:", "Summary:" as seen in examples';
+      case 'paragraph_format':
+        return '- Write in a flowing paragraph format without strict sections';
+      default:
+        return '- Follow the structure pattern shown in the examples';
+    }
   }
 }
 
