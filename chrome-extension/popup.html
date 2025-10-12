@@ -2,133 +2,140 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Article Summarizer Settings</title>
+  <title>Schemin Automation</title>
   <style>
-    body {
-      width: 350px;
-      min-height: 400px;
-      padding: 20px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    * {
       margin: 0;
-    }
-    
-    h1 {
-      font-size: 18px;
-      margin: 0 0 20px 0;
-      color: #4285f4;
-    }
-    
-    .section {
-      margin-bottom: 20px;
-    }
-    
-    label {
-      display: block;
-      font-size: 13px;
-      font-weight: 500;
-      margin-bottom: 5px;
-      color: #333;
-    }
-    
-    input[type="text"] {
-      width: 100%;
-      padding: 8px;
-      border: 1px solid #ddd;
-      border-radius: 4px;
-      font-size: 13px;
+      padding: 0;
       box-sizing: border-box;
     }
     
-    input[type="text"]:focus {
-      outline: none;
-      border-color: #4285f4;
+    body {
+      width: 380px;
+      min-height: 200px;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f9f9f9;
     }
     
-    .toggle-container {
+    .header {
+      background: #ffffff;
+      padding: 16px 20px;
+      border-bottom: 1px solid #e5e7eb;
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      padding: 10px;
-      background: #f5f5f5;
-      border-radius: 4px;
+      gap: 10px;
     }
     
-    .toggle-label {
-      font-size: 13px;
-      color: #333;
-      margin: 0;
-    }
-    
-    .toggle-switch {
-      position: relative;
-      width: 44px;
+    .header img {
+      width: 24px;
       height: 24px;
     }
     
-    .toggle-switch input {
-      opacity: 0;
-      width: 0;
-      height: 0;
+    .header h1 {
+      font-size: 16px;
+      font-weight: 600;
+      color: #111827;
     }
     
-    .slider {
-      position: absolute;
-      cursor: pointer;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background-color: #ccc;
-      transition: .3s;
-      border-radius: 24px;
+    .content {
+      padding: 16px 20px;
     }
     
-    .slider:before {
-      position: absolute;
-      content: "";
-      height: 18px;
-      width: 18px;
-      left: 3px;
-      bottom: 3px;
-      background-color: white;
-      transition: .3s;
-      border-radius: 50%;
-    }
-    
-    input:checked + .slider {
-      background-color: #4285f4;
-    }
-    
-    input:checked + .slider:before {
-      transform: translateX(20px);
-    }
-    
-    button {
-      width: 100%;
-      padding: 10px;
-      background: #4285f4;
-      color: white;
-      border: none;
-      border-radius: 4px;
+    .no-automation {
+      text-align: center;
+      padding: 32px 20px;
+      color: #6b7280;
       font-size: 14px;
+    }
+    
+    .no-automation .icon {
+      font-size: 48px;
+      margin-bottom: 12px;
+    }
+    
+    .no-automation .title {
+      font-weight: 600;
+      font-size: 15px;
+      color: #374151;
+      margin-bottom: 8px;
+    }
+    
+    .no-automation .subtitle {
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    
+    .automation-card {
+      background: #ffffff;
+      border: 2px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+    
+    .automation-card .title {
+      font-size: 15px;
+      font-weight: 600;
+      color: #5d667a;
+      margin-bottom: 12px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    
+    .automation-card .field {
+      margin-bottom: 8px;
+      font-size: 12px;
+    }
+    
+    .automation-card .label {
+      font-weight: 600;
+      color: #6b7280;
+      text-transform: uppercase;
+      display: inline-block;
+      min-width: 70px;
+    }
+    
+    .automation-card .value {
+      color: #374151;
       font-weight: 500;
+      font-size: 13px;
+    }
+    
+    .log-button {
+      width: 100%;
+      padding: 12px;
+      background: #5B5FED;
+      color: #ffffff;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
       cursor: pointer;
-      margin-top: 10px;
+      margin-top: 12px;
+      transition: all 0.2s;
     }
     
-    button:hover {
-      background: #3367d6;
+    .log-button:hover {
+      background: #4a4ed4;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(91, 95, 237, 0.3);
     }
     
-    button:disabled {
-      background: #ccc;
+    .log-button:active {
+      transform: translateY(0);
+    }
+    
+    .log-button:disabled {
+      background: #d1d5db;
       cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
     }
     
     .status {
-      margin-top: 15px;
+      margin-top: 12px;
       padding: 10px;
-      border-radius: 4px;
+      border-radius: 6px;
       font-size: 12px;
       text-align: center;
       display: none;
@@ -146,74 +153,93 @@
       display: block;
     }
     
-    .info {
-      background: #e7f3ff;
+    .status.info {
+      background: #cfe2ff;
+      color: #084298;
+      display: block;
+    }
+    
+    .open-webapp {
+      display: block;
+      text-align: center;
       padding: 10px;
-      border-radius: 4px;
+      color: #5B5FED;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 500;
+      margin-top: 12px;
+      border-top: 1px solid #e5e7eb;
+    }
+    
+    .open-webapp:hover {
+      background: #f3f4f6;
+    }
+    
+    .loading {
+      text-align: center;
+      padding: 32px;
+      color: #6b7280;
+      font-size: 14px;
+    }
+    
+    .spinner {
+      border: 3px solid #f3f4f6;
+      border-top: 3px solid #5B5FED;
+      border-radius: 50%;
+      width: 32px;
+      height: 32px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 12px;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    .permission-request {
+      background: #fffbeb;
+      border: 1px solid #fcd34d;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 12px;
       font-size: 12px;
-      color: #004085;
-      margin-top: 15px;
+      color: #92400e;
     }
     
-    .article-info {
-      background: #f9f9f9;
-      padding: 10px;
-      border-radius: 4px;
+    .permission-request button {
+      width: 100%;
+      padding: 8px;
+      background: #fbbf24;
+      color: #78350f;
+      border: none;
+      border-radius: 6px;
       font-size: 12px;
-      margin-bottom: 15px;
-    }
-    
-    .article-info p {
-      margin: 5px 0;
-    }
-    
-    .article-info .label {
       font-weight: 600;
-      color: #666;
+      cursor: pointer;
+      margin-top: 8px;
+    }
+    
+    .permission-request button:hover {
+      background: #f59e0b;
     }
   </style>
 </head>
 <body>
-  <h1>📝 Article Summarizer</h1>
-  
-  <div id="articleInfo" class="article-info" style="display: none;">
-    <p><span class="label">Current Page:</span> <span id="isArticle"></span></p>
-    <p><span class="label">Read:</span> <span id="scrollPercentage">0</span>%</p>
+  <div class="header">
+    <img src="icon48.png" alt="Logo">
+    <h1>Schemin Automation</h1>
   </div>
   
-  <div class="section">
-    <label for="serverUrl">Server URL</label>
-    <input type="text" id="serverUrl" placeholder="http://localhost:3000" value="http://localhost:3000">
-  </div>
-  
-  <div class="section">
-    <label for="targetFile">Target Google Drive File</label>
-    <input type="text" id="targetFile" placeholder="e.g., article-summaries.txt">
-    <div style="font-size: 11px; color: #666; margin-top: 5px;">
-      Enter the name of the file where summaries will be saved
+  <div id="content" class="content">
+    <div class="loading">
+      <div class="spinner"></div>
+      <div>Loading automations...</div>
     </div>
   </div>
   
-  <div class="section">
-    <div class="toggle-container">
-      <label class="toggle-label" for="autoSummarize">Auto-summarize on tab switch</label>
-      <label class="toggle-switch">
-        <input type="checkbox" id="autoSummarize">
-        <span class="slider"></span>
-      </label>
-    </div>
-  </div>
-  
-  <button id="saveSettings">Save Settings</button>
-  <button id="summarizeNow" style="background: #34a853;">Summarize Current Article</button>
-  
-  <div id="status" class="status"></div>
-  
-  <div class="info">
-    💡 This extension detects articles and automatically summarizes what you've read when you switch tabs.
-  </div>
+  <a href="#" id="openWebapp" class="open-webapp">📋 Open Dashboard</a>
   
   <script src="popup.js"></script>
 </body>
 </html>
-

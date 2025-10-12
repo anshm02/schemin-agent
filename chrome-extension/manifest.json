@@ -1,27 +1,34 @@
 {
   "manifest_version": 3,
-  "name": "Article Summarizer - Google Drive",
-  "version": "1.0.0",
-  "description": "Automatically summarize articles you read and save to Google Drive",
+  "name": "Schemin - Smart Automation",
+  "version": "2.0.0",
+  "description": "Smart automation for tracking web content and logging to Google Drive",
   "permissions": [
     "tabs",
     "storage",
     "activeTab",
-    "notifications"
+    "notifications",
+    "scripting"
   ],
   "host_permissions": [
     "http://localhost:3000/*"
   ],
+  "optional_host_permissions": [
+    "*://*.linkedin.com/*",
+    "*://*.indeed.com/*",
+    "*://*.glassdoor.com/*",
+    "*://*.jobright.com/*",
+    "*://*.techcrunch.com/*",
+    "*://*.hackernews.com/*",
+    "*://*.arxiv.org/*",
+    "*://*.github.com/*",
+    "*://*.medium.com/*",
+    "*://*.substack.com/*",
+    "*://*/"
+  ],
   "background": {
     "service_worker": "background.js"
   },
-  "content_scripts": [
-    {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
-      "run_at": "document_idle"
-    }
-  ],
   "action": {
     "default_popup": "popup.html",
     "default_icon": {

@@ -196,6 +196,164 @@ app.get('/api/status', async (req: Request, res: Response) => {
   }
 });
 
+let globalAutomations: any[] = [];
+
+app.post('/api/automations/sync', async (req: Request, res: Response) => {
+  const { automations } = req.body;
+  globalAutomations = automations || [];
+  res.json({ success: true });
+});
+
+app.get('/api/automations', async (req: Request, res: Response) => {
+  res.json({ automations: globalAutomations });
+});
+
+app.post('/api/log-automation', async (req: Request, res: Response) => {
+  try {
+    if (!req.session?.userId) {
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
+
+    const { automation, url, data, timestamp } = req.body;
+    
+    if (!automation || !data) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const auth = await googleAuthService.getAuthenticatedClient(req.session.userId);
+    const targetFile = automation.storeTo;
+    
+    // Analyze the target file format
+    const formatAnalysis = await googleDriveService.analyzeFileFormat(auth, targetFile);
+    
+    if (formatAnalysis.fileType === 'sheet' && formatAnalysis.sheetFormat) {
+      // Log to Google Sheet
+      const drive = google.drive({ version: 'v3', auth });
+      const searchResponse = await drive.files.list({
+        q: `name = '${targetFile.replace(/'/g, "\\'")}' and trashed = false`,
+        pageSize: 1,
+        fields: 'files(id)'
+      });
+      
+      if (searchResponse.data.files && searchResponse.data.files.length > 0) {
+        const fileId = searchResponse.data.files[0].id!;
+        
+        // Prepare data for sheet based on columns
+        const sheetData = prepareSheetData(data, formatAnalysis.sheetFormat);
+        
+        await googleDriveService.appendToSheet(auth, fileId, sheetData);
+        
+        res.json({ 
+          success: true,
+          fileType: 'sheet',
+          message: `Data logged to ${targetFile}`,
+          data: sheetData
+        });
+      } else {
+        res.status(404).json({ error: 'Sheet not found. Please create it first.' });
+      }
+    } else {
+      // Log to document (plain text format)
+      const formattedEntry = formatDataForDoc(automation, data, url, timestamp);
+      
+      const drive = google.drive({ version: 'v3', auth });
+      const searchResponse = await drive.files.list({
+        q: `name = '${targetFile.replace(/'/g, "\\'")}' and trashed = false`,
+        pageSize: 1,
+        fields: 'files(id)'
+      });
+      
+      if (searchResponse.data.files && searchResponse.data.files.length > 0) {
+        const fileId = searchResponse.data.files[0].id!;
+        await googleDriveService.appendToDoc(auth, fileId, formattedEntry);
+        
+        res.json({ 
+          success: true,
+          fileType: 'doc',
+          message: `Data logged to ${targetFile}`
+        });
+      } else {
+        // Create new file if it doesn't exist
+        const result = await googleDriveService.appendToFile(auth, targetFile, formattedEntry);
+        res.json({ 
+          success: true,
+          fileType: 'text',
+          message: `Data logged to new file ${targetFile}`,
+          file: result
+        });
+      }
+    }
+  } catch (error) {
+    console.error('Automation logging error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    res.status(500).json({ error: errorMessage });
+  }
+});
+
+function prepareSheetData(data: any, sheetFormat: any): string[][] {
+  const headers = sheetFormat.columns || [];
+  const row: string[] = [];
+  
+  // Add timestamp first if not in data
+  if (!data.timestamp && !data.date) {
+    row.push(new Date().toISOString());
+  }
+  
+  // Map extracted data to sheet columns
+  for (const header of headers) {
+    const headerLower = header.toLowerCase();
+    let value = '';
+    
+    // Match header to data fields
+    if (headerLower.includes('title') && data.title) {
+      value = data.title;
+    } else if (headerLower.includes('url') || headerLower.includes('link')) {
+      value = data.link || data.pageUrl || '';
+    } else if (headerLower.includes('company')) {
+      value = data.company || '';
+    } else if (headerLower.includes('job') || headerLower.includes('position')) {
+      value = data.jobTitle || '';
+    } else if (headerLower.includes('location')) {
+      value = data.location || '';
+    } else if (headerLower.includes('salary')) {
+      value = data.salary || '';
+    } else if (headerLower.includes('author')) {
+      value = data.author || '';
+    } else if (headerLower.includes('date') || headerLower.includes('time')) {
+      value = data.date || data.extractedAt || '';
+    } else if (headerLower.includes('description') || headerLower.includes('summary')) {
+      value = data.description || '';
+    } else {
+      // Try to find exact match
+      value = data[header] || data[headerLower] || '';
+    }
+    
+    row.push(value);
+  }
+  
+  return [row];
+}
+
+function formatDataForDoc(automation: any, data: any, url: string, timestamp: string): string {
+  let formatted = `
+========================================
+Automation: ${automation.title}
+Date: ${timestamp}
+URL: ${url}
+----------------------------------------
+`;
+  
+  for (const [key, value] of Object.entries(data)) {
+    if (key !== 'extractedAt' && key !== 'pageUrl' && key !== 'pageTitle') {
+      formatted += `${key.charAt(0).toUpperCase() + key.slice(1)}: ${value}\n`;
+    }
+  }
+  
+  formatted += `========================================\n\n`;
+  
+  return formatted;
+}
+
 app.post('/api/summarize-article', async (req: Request, res: Response) => {
   try {
     if (!req.session?.userId) {

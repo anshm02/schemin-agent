@@ -1,95 +1,142 @@
-# Google Drive AI Assistant - Setup Guide
+# Setup Guide
+
+Complete setup instructions for the Schemin Automation System.
 
 ## Prerequisites
-- Node.js 18+ installed
+
+- Node.js 16 or higher
+- npm or yarn
 - Google Cloud Platform account
 - OpenAI API account
+- Chrome browser
 
-## Step 1: Google Cloud Setup
+## Google Cloud Setup
+
+### 1. Create OAuth Credentials
 
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project or select an existing one
-3. Enable the Google Drive API:
-   - Navigate to "APIs & Services" > "Library"
-   - Search for "Google Drive API"
-   - Click "Enable"
+2. Create a new project or select existing
+3. Enable Google Drive API
+4. Go to "Credentials" and create OAuth 2.0 Client ID
+5. Application type: Web application
+6. Authorized redirect URIs: `http://localhost:3000/auth/google/callback`
+7. Download credentials JSON
 
-4. Create OAuth 2.0 Credentials:
-   - Go to "APIs & Services" > "Credentials"
-   - Click "Create Credentials" > "OAuth client ID"
-   - Choose "Web application"
-   - Add authorized redirect URI: `http://localhost:3000/auth/google/callback`
-   - Download the credentials JSON file
+### 2. Configure Environment
 
-5. Configure OAuth Consent Screen:
-   - Go to "APIs & Services" > "OAuth consent screen"
-   - Choose "External" user type
-   - Fill in application name and required fields
-   - Add scopes: `https://www.googleapis.com/auth/drive`
-   - Add test users if in testing mode
+Create `tokens.json` in the project root:
 
-## Step 2: OpenAI API Setup
-
-1. Go to [OpenAI Platform](https://platform.openai.com/)
-2. Navigate to API Keys section
-3. Create a new API key
-4. Save the key securely
-
-## Step 3: Project Setup
-
-1. Install dependencies:
-```bash
-npm install
+```json
+{
+  "client_id": "your-client-id.apps.googleusercontent.com",
+  "client_secret": "your-client-secret",
+  "redirect_uri": "http://localhost:3000/auth/google/callback"
+}
 ```
 
-2. Create `.env` file in the project root:
+Or use environment variables:
 ```bash
-GOOGLE_CLIENT_ID=your_google_client_id_here
-GOOGLE_CLIENT_SECRET=your_google_client_secret_here
+GOOGLE_CLIENT_ID=your-client-id
+GOOGLE_CLIENT_SECRET=your-client-secret
 GOOGLE_REDIRECT_URI=http://localhost:3000/auth/google/callback
-OPENAI_API_KEY=your_openai_api_key_here
-SESSION_SECRET=generate_a_random_secret_here
-PORT=3000
+SESSION_SECRET=your-random-session-secret
 ```
 
-3. Generate a session secret:
-```bash
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+## OpenAI API Setup
+
+Get your API key from [OpenAI Platform](https://platform.openai.com/api-keys)
+
+Create `webapp/.env`:
+```
+VITE_OPENAI_API_KEY=sk-your-openai-api-key
 ```
 
-## Step 4: Run the Application
+## Installation
 
-Development mode:
-```bash
-npm run dev
-```
+### Backend Server
 
-Production mode:
 ```bash
+# Install dependencies
+npm install
+
+# Build TypeScript
 npm run build
+
+# Start server (port 3000)
 npm start
 ```
 
-## Step 5: Using the Application
+### Web Dashboard
 
-1. Open your browser and navigate to `http://localhost:3000`
+```bash
+# Navigate to webapp directory
+cd webapp
+
+# Install dependencies
+npm install
+
+# Create .env file with OpenAI key
+echo "VITE_OPENAI_API_KEY=sk-your-key" > .env
+
+# Start development server (port 5173)
+npm run dev
+```
+
+### Chrome Extension
+
+1. Open Chrome
+2. Navigate to `chrome://extensions/`
+3. Enable "Developer mode" (toggle in top right)
+4. Click "Load unpacked"
+5. Select the `chrome-extension` directory
+
+## Verification
+
+### Check Backend
+```bash
+curl http://localhost:3000/api/status
+# Should return: {"authenticated":false}
+```
+
+### Check Web Dashboard
+Open `http://localhost:5173` in browser
+- Should see automation dashboard
+
+### Check Extension
+Click extension icon in Chrome
+- Should see "No Active Automations" message initially
+
+## Authentication
+
+1. Open backend server at `http://localhost:3000`
 2. Click "Sign in with Google"
-3. Authorize the application to access your Google Drive
-4. Start chatting with your Google Drive files!
+3. Grant permissions to access Google Drive
+4. You should be redirected back authenticated
 
-## Example Queries
+## Troubleshooting
 
-- "Search for all PDF files in my Drive"
-- "Show me files modified in the last week"
-- "Read the content of the file named 'meeting-notes.txt'"
-- "Create a new text file called 'todo.txt' with a list of my tasks"
-- "Edit the file 'budget.txt' and add expenses for this month"
+### Port Already in Use
+```bash
+# Kill processes on specific ports
+lsof -ti:3000 | xargs kill -9
+lsof -ti:5173 | xargs kill -9
+```
 
-## Security Notes
+### Backend Won't Start
+- Check `tokens.json` exists and is valid
+- Verify Google OAuth credentials are correct
+- Check logs: `tail -f backend.log`
 
-- Never commit your `.env` file to version control
-- Keep your OAuth credentials secure
-- Regularly rotate your API keys
-- Use HTTPS in production
-- The `tokens.json` file contains sensitive user tokens - keep it secure
+### Webapp Won't Start
+- Verify OpenAI API key in `.env`
+- Check node_modules installed: `npm install`
+- Check logs: `tail -f webapp.log`
 
+### Extension Not Loading
+- Verify manifest.json has no errors
+- Check extension console for errors
+- Reload extension from `chrome://extensions/`
+
+## Next Steps
+
+After setup is complete, see `TESTING.md` for usage instructions.

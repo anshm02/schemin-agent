@@ -1,65 +1,117 @@
-# Google Drive AI Assistant
+# Schemin Automation System
 
-A production-level application that integrates Google Drive with GPT through the Model Context Protocol (MCP), enabling natural language interactions with your Google Drive files.
+A smart automation system for tracking web content and logging data to Google Drive. Create automations using natural language, then capture data from any website with a single click.
 
-## Features
+## Overview
 
-### Implemented
-- 🔐 **Production OAuth 2.0 Flow**: Secure Gmail-based authentication for Google Drive access
-- 🔍 **Search Files**: Find files in Google Drive using natural language queries
-- 📖 **Read Files**: Read content from any Google Drive file
-- ✏️ **Edit Files**: Modify existing files through conversational commands
-- 📝 **Create Files**: Generate new files in Google Drive
-- 🤖 **GPT Integration**: Powered by OpenAI's GPT-4 Turbo for intelligent file operations
-- 🔄 **Token Management**: Automatic token refresh and secure storage
+The system consists of three components:
 
-### Technical Architecture
-- **Backend**: Node.js + TypeScript + Express
-- **Authentication**: Google OAuth 2.0 with automatic token refresh
-- **AI Integration**: OpenAI GPT-4 Turbo with function calling
-- **MCP Protocol**: Model Context Protocol for AI-to-Drive communication
-- **Security**: Session management, secure token storage, HTTPS-ready
+1. **Backend Server** - Node.js API server handling Google Drive integration and data processing
+2. **Web Dashboard** - React application for creating and managing automations
+3. **Chrome Extension** - Browser extension for capturing data from websites
+
+## Key Features
+
+- Natural language automation creation using GPT-4
+- Privacy-first design with dynamic permissions
+- User-controlled data logging (no automatic tracking)
+- Smart data extraction from any website
+- Google Sheets and Google Docs integration
 
 ## Quick Start
 
-1. **Install dependencies**:
+### Prerequisites
+
+- Node.js 16+
+- Google Cloud OAuth credentials
+- OpenAI API key
+- Chrome browser
+
+### Installation
+
 ```bash
+# Install dependencies
 npm install
+
+# Build TypeScript
+npm run build
+
+# Set up environment variables
+# Add Google OAuth credentials and OpenAI API key to .env or tokens.json
 ```
 
-2. **Configure environment**:
-```bash
-cp env.template .env
-# Edit .env with your credentials
-```
+### Running the Application
 
-3. **Run the application**:
+Start both services in separate terminals:
+
 ```bash
+# Terminal 1: Backend Server (port 3000)
+npm start
+
+# Terminal 2: Web Dashboard (port 5173)
+cd webapp
+npm install
+echo "VITE_OPENAI_API_KEY=your-key-here" > .env
 npm run dev
 ```
 
-4. **Open your browser**: Navigate to `http://localhost:3000`
+### Chrome Extension Setup
+
+1. Open Chrome and navigate to `chrome://extensions/`
+2. Enable "Developer mode"
+3. Click "Load unpacked"
+4. Select the `chrome-extension` directory
+
+## Usage
+
+### Creating an Automation
+
+1. Open the web dashboard at `http://localhost:5173`
+2. Type your automation in plain English:
+   ```
+   Track job postings from LinkedIn and Indeed,
+   extract job title, company, location, and salary,
+   save to job_applications sheet
+   ```
+3. Press Enter to create the automation card
+
+### Using the Extension
+
+1. Visit a matching website (e.g., LinkedIn)
+2. Click the extension icon (badge shows a blue dot when applicable)
+3. Grant permissions if prompted
+4. Click "Log to [sheet name]" to capture data
+5. Data is automatically saved to your Google Sheet
+
+## Architecture
+
+```
+Web Dashboard (React)
+    ↓ HTTP POST
+Backend Server (Node.js)
+    ↓ Stores in memory
+Chrome Extension
+    ↓ HTTP GET
+    ↓ Captures data
+Backend Server
+    ↓ Formats and saves
+Google Drive (Sheets/Docs)
+```
+
+## Privacy & Permissions
+
+- No `<all_urls>` permission required
+- Only requests access to websites you explicitly configure
+- Data is logged only when you click the button
+- All permissions are optional and can be revoked
 
 ## Documentation
 
-- **[SETUP.md](./SETUP.md)** - Complete setup instructions for Google Cloud and OpenAI
-- **[USAGE.md](./USAGE.md)** - User guide with examples and API reference
-- **[env.template](./env.template)** - Environment variables template
+- `SETUP.md` - Detailed installation and configuration instructions
+- `TESTING.md` - Testing guide and troubleshooting
+- `chrome-extension/README.md` - Extension-specific documentation
+- `webapp/README.md` - Web dashboard documentation
 
-## Example Usage
+## License
 
-Once authenticated, you can interact with your Google Drive using natural language:
-
-```
-User: "Find all my PDF files"
-Assistant: [Lists all PDF files with names and links]
-
-User: "Read the content of meeting-notes.txt"
-Assistant: [Displays file content]
-
-User: "Create a new file called todo.txt with my tasks for today"
-Assistant: [Creates file and confirms]
-
-User: "Edit budget.txt and add this month's expenses"
-Assistant: [Updates file and confirms changes]
-```
+See LICENSE file for details.
