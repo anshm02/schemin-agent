@@ -6,6 +6,7 @@ import { googleAuthService } from './services/googleAuth';
 import { tokenStorage } from './services/tokenStorage';
 import { gptService } from './services/gptService';
 import { googleDriveService } from './services/googleDrive';
+import { phi3Service } from './services/readerService';
 
 const app = express();
 
@@ -239,7 +240,7 @@ app.post('/api/log-automation', async (req: Request, res: Response) => {
         const fileId = searchResponse.data.files[0].id!;
         
         // Prepare data for sheet based on columns
-        const sheetData = prepareSheetData(data, formatAnalysis.sheetFormat);
+        const sheetData = await prepareSheetData(data, formatAnalysis.sheetFormat);
         
         await googleDriveService.appendToSheet(auth, fileId, sheetData);
         
@@ -290,48 +291,31 @@ app.post('/api/log-automation', async (req: Request, res: Response) => {
   }
 });
 
-function prepareSheetData(data: any, sheetFormat: any): string[][] {
+async function prepareSheetData(data: any, sheetFormat: any): Promise<string[]> {
   const headers = sheetFormat.columns || [];
-  const row: string[] = [];
   
-  // Add timestamp first if not in data
-  if (!data.timestamp && !data.date) {
-    row.push(new Date().toISOString());
+  console.log('Preparing sheet data:');
+  console.log('  Headers:', headers);
+  console.log('  Data:', data);
+  
+  if (headers.length === 0) {
+    console.log('  No headers found - creating data row from extracted fields');
+    
+    const dataKeys = Object.keys(data);
+    const dataValues = Object.values(data).map(v => String(v || 'Not detected'));
+    
+    console.log('  Auto-generated headers:', dataKeys);
+    console.log('  Data values:', dataValues);
+    console.log('  Final row:', dataValues);
+    
+    return dataValues;
   }
   
-  // Map extracted data to sheet columns
-  for (const header of headers) {
-    const headerLower = header.toLowerCase();
-    let value = '';
-    
-    // Match header to data fields
-    if (headerLower.includes('title') && data.title) {
-      value = data.title;
-    } else if (headerLower.includes('url') || headerLower.includes('link')) {
-      value = data.link || data.pageUrl || '';
-    } else if (headerLower.includes('company')) {
-      value = data.company || '';
-    } else if (headerLower.includes('job') || headerLower.includes('position')) {
-      value = data.jobTitle || '';
-    } else if (headerLower.includes('location')) {
-      value = data.location || '';
-    } else if (headerLower.includes('salary')) {
-      value = data.salary || '';
-    } else if (headerLower.includes('author')) {
-      value = data.author || '';
-    } else if (headerLower.includes('date') || headerLower.includes('time')) {
-      value = data.date || data.extractedAt || '';
-    } else if (headerLower.includes('description') || headerLower.includes('summary')) {
-      value = data.description || '';
-    } else {
-      // Try to find exact match
-      value = data[header] || data[headerLower] || '';
-    }
-    
-    row.push(value);
-  }
+  const mappedRow = await phi3Service.mapToSheetHeaders(data, headers);
   
-  return [row];
+  console.log('  Final row:', mappedRow);
+  
+  return mappedRow;
 }
 
 function formatDataForDoc(automation: any, data: any, url: string, timestamp: string): string {
@@ -495,6 +479,175 @@ ${summary}
     }
   } catch (error) {
     console.error('Article summarization error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    res.status(500).json({ error: errorMessage });
+  }
+});
+
+app.post('/api/process-content', async (req: Request, res: Response) => {
+  try {
+    const { content, extractionType, automation } = req.body;
+    
+    if (!content || !automation) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    let textContent = '';
+    
+    if (extractionType === 'viewed') {
+      textContent = content.viewedElements
+        .map((el: any) => el.text)
+        .join('\n\n');
+    } else if (extractionType === 'readability') {
+      textContent = content.textContent || content.htmlContent;
+    }
+    
+    console.log('\n========================================');
+    console.log('PROCESSING CONTENT');
+    console.log('========================================');
+    console.log('URL:', content.url);
+    console.log('Title:', content.title);
+    console.log('Extraction Type:', extractionType);
+    console.log('Automation:', automation.title);
+    console.log('Extracted Content Length:', textContent.length);
+    console.log('Extracted Content Preview:');
+    console.log(textContent.substring(0, 500));
+    console.log('...\n');
+    
+    const isRelevant = await phi3Service.classifyIntent(
+      textContent,
+      automation.title,
+      automation.extract
+    );
+    
+    if (!isRelevant) {
+      console.log('Content deemed NOT RELEVANT by model');
+      console.log('========================================\n');
+      return res.json({
+        relevant: false,
+        message: 'Content is not relevant to the automation intent',
+        contentPreview: textContent.substring(0, 500)
+      });
+    }
+    
+    console.log('✓ Content is RELEVANT - proceeding with field extraction');
+    
+    const extractedFields = await phi3Service.extractFields(
+      textContent,
+      automation.extract
+    );
+    
+    console.log('✓ EXTRACTION COMPLETE');
+    
+    if (!req.session?.userId) {
+      console.log('⚠️  User not authenticated - skipping Google Drive write');
+      console.log('========================================\n');
+      return res.json({
+        relevant: true,
+        extractedFields,
+        url: content.url,
+        title: content.title,
+        timestamp: content.timestamp || new Date().toISOString(),
+        stored: false,
+        message: 'Data extracted but not stored. Please authenticate with Google Drive.'
+      });
+    }
+    
+    const auth = await googleAuthService.getAuthenticatedClient(req.session.userId);
+    const targetFile = automation.storeTo;
+    const timestamp = content.timestamp || new Date().toISOString();
+    
+    console.log('✓ Writing to Google Drive:', targetFile);
+    
+    const formatAnalysis = await googleDriveService.analyzeFileFormat(auth, targetFile);
+    
+    if (formatAnalysis.fileType === 'sheet' && formatAnalysis.sheetFormat) {
+      const drive = google.drive({ version: 'v3', auth });
+      const searchResponse = await drive.files.list({
+        q: `name = '${targetFile.replace(/'/g, "\\'")}' and trashed = false`,
+        pageSize: 1,
+        fields: 'files(id)'
+      });
+      
+      if (searchResponse.data.files && searchResponse.data.files.length > 0) {
+        const fileId = searchResponse.data.files[0].id!;
+        
+        const dataForSheet = {
+          ...extractedFields,
+          url: content.url,
+          timestamp: timestamp
+        };
+        
+        const sheetData = await prepareSheetData(dataForSheet, formatAnalysis.sheetFormat);
+        await googleDriveService.appendToSheet(auth, fileId, sheetData);
+        
+        console.log('✓ Data written to Google Sheet');
+        console.log('========================================\n');
+        
+        res.json({
+          relevant: true,
+          extractedFields,
+          url: content.url,
+          title: content.title,
+          timestamp: timestamp,
+          stored: true,
+          storageType: 'sheet',
+          storageLocation: targetFile
+        });
+      } else {
+        console.log('❌ Sheet not found:', targetFile);
+        console.log('========================================\n');
+        return res.status(404).json({ error: 'Sheet not found. Please create it first.' });
+      }
+    } else {
+      const formattedEntry = formatDataForDoc(automation, extractedFields, content.url, timestamp);
+      
+      const drive = google.drive({ version: 'v3', auth });
+      const searchResponse = await drive.files.list({
+        q: `name = '${targetFile.replace(/'/g, "\\'")}' and trashed = false`,
+        pageSize: 1,
+        fields: 'files(id)'
+      });
+      
+      if (searchResponse.data.files && searchResponse.data.files.length > 0) {
+        const fileId = searchResponse.data.files[0].id!;
+        await googleDriveService.appendToDoc(auth, fileId, formattedEntry);
+        
+        console.log('✓ Data written to Google Doc');
+        console.log('========================================\n');
+        
+        res.json({
+          relevant: true,
+          extractedFields,
+          url: content.url,
+          title: content.title,
+          timestamp: timestamp,
+          stored: true,
+          storageType: 'doc',
+          storageLocation: targetFile
+        });
+      } else {
+        const result = await googleDriveService.appendToFile(auth, targetFile, formattedEntry);
+        
+        console.log('✓ Data written to new file:', targetFile);
+        console.log('========================================\n');
+        
+        res.json({
+          relevant: true,
+          extractedFields,
+          url: content.url,
+          title: content.title,
+          timestamp: timestamp,
+          stored: true,
+          storageType: 'text',
+          storageLocation: targetFile,
+          fileId: result.id
+        });
+      }
+    }
+    
+  } catch (error) {
+    console.error('Content processing error:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     res.status(500).json({ error: errorMessage });
   }

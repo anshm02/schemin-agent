@@ -1,281 +1,122 @@
-// Smart data extraction based on automation fields
+// Intersection Observer tracking for viewed content
+let viewedElements = new Set();
+let observer = null;
 
-function extractDataFromPage(extractFields) {
-  const fields = extractFields.toLowerCase().split(',').map(f => f.trim());
-  const data = {};
-  
-  // Extract title
-  if (fields.some(f => f.includes('title'))) {
-    data.title = extractTitle();
+function initIntersectionObserver() {
+  if (observer) {
+    observer.disconnect();
   }
   
-  // Extract link/URL
-  if (fields.some(f => f.includes('link') || f.includes('url'))) {
-    data.link = window.location.href;
-  }
+  viewedElements = new Set();
   
-  // Extract company (for job sites)
-  if (fields.some(f => f.includes('company'))) {
-    data.company = extractCompany();
-  }
+  observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting && entry.intersectionRatio >= 0.5) {
+        viewedElements.add(entry.target);
+      }
+    });
+  }, {
+    threshold: [0.5]
+  });
   
-  // Extract job title/position
-  if (fields.some(f => f.includes('job') || f.includes('position'))) {
-    data.jobTitle = extractJobTitle();
-  }
-  
-  // Extract location
-  if (fields.some(f => f.includes('location'))) {
-    data.location = extractLocation();
-  }
-  
-  // Extract salary
-  if (fields.some(f => f.includes('salary') || f.includes('pay') || f.includes('compensation'))) {
-    data.salary = extractSalary();
-  }
-  
-  // Extract author
-  if (fields.some(f => f.includes('author') || f.includes('writer'))) {
-    data.author = extractAuthor();
-  }
-  
-  // Extract date
-  if (fields.some(f => f.includes('date') || f.includes('published') || f.includes('posted'))) {
-    data.date = extractDate();
-  }
-  
-  // Extract description/content
-  if (fields.some(f => f.includes('description') || f.includes('content') || f.includes('summary'))) {
-    data.description = extractDescription();
-  }
-  
-  // Add metadata
-  data.extractedAt = new Date().toISOString();
-  data.pageUrl = window.location.href;
-  data.pageTitle = document.title;
-  
-  return data;
-}
-
-function extractTitle() {
-  // Try various title selectors
-  const selectors = [
+  const selectorsToObserve = [
+    'article',
+    'main',
+    'section',
+    '[role="article"]',
+    '[role="main"]',
+    '.job-card',
+    '.post',
+    '.content',
+    'p',
     'h1',
-    '[data-test="job-title"]',
-    '.job-title',
-    '.post-title',
-    '.article-title',
-    'article h1',
-    '[role="heading"]',
-    '.title'
+    'h2',
+    'h3',
+    'div[class*="card"]',
+    'li[class*="item"]'
   ];
   
-  for (const selector of selectors) {
-    const element = document.querySelector(selector);
-    if (element && element.textContent.trim()) {
-      return element.textContent.trim();
-    }
-  }
-  
-  return document.title;
+  selectorsToObserve.forEach(selector => {
+    document.querySelectorAll(selector).forEach(element => {
+      observer.observe(element);
+    });
+  });
 }
 
-function extractCompany() {
-  const selectors = [
-    '[data-test="employer-name"]',
-    '.company',
-    '.companyName',
-    '.employer',
-    '[class*="company"]',
-    '[data-company]',
-    'a[href*="/company/"]'
-  ];
+function extractViewedContent() {
+  const viewedContent = {
+    url: window.location.href,
+    title: document.title,
+    timestamp: new Date().toISOString(),
+    viewedElements: []
+  };
   
-  for (const selector of selectors) {
-    const element = document.querySelector(selector);
-    if (element && element.textContent.trim()) {
-      return element.textContent.trim();
+  viewedElements.forEach(element => {
+    const tagName = element.tagName.toLowerCase();
+    const className = element.className || '';
+    const id = element.id || '';
+    const text = element.textContent.trim();
+    const html = element.outerHTML;
+    
+    if (text.length > 0) {
+      viewedContent.viewedElements.push({
+        tagName,
+        className,
+        id,
+        text: text.substring(0, 1000),
+        html: html.substring(0, 2000)
+      });
     }
-  }
+  });
   
-  // Try meta tags
-  const metaCompany = document.querySelector('meta[property="og:site_name"]');
-  if (metaCompany) {
-    return metaCompany.content;
-  }
-  
-  return '';
+  return viewedContent;
 }
 
-function extractJobTitle() {
-  const selectors = [
-    '[data-test="job-title"]',
-    '.job-title',
-    '.jobTitle',
-    'h1[class*="job"]',
-    '[class*="position"]'
-  ];
+function extractFullContentWithReadability() {
+  const documentClone = document.cloneNode(true);
+  const article = new Readability(documentClone).parse();
   
-  for (const selector of selectors) {
-    const element = document.querySelector(selector);
-    if (element && element.textContent.trim()) {
-      return element.textContent.trim();
-    }
+  if (article) {
+    return {
+      url: window.location.href,
+      timestamp: new Date().toISOString(),
+      title: article.title,
+      byline: article.byline,
+      excerpt: article.excerpt,
+      siteName: article.siteName,
+      textContent: article.textContent,
+      htmlContent: article.content,
+      length: article.length
+    };
   }
   
-  return extractTitle();
-}
-
-function extractLocation() {
-  const selectors = [
-    '[data-test="job-location"]',
-    '.location',
-    '[class*="location"]',
-    '[data-location]',
-    'span:has-text("location")',
-    '.job-location'
-  ];
-  
-  for (const selector of selectors) {
-    const element = document.querySelector(selector);
-    if (element && element.textContent.trim()) {
-      return element.textContent.trim();
-    }
-  }
-  
-  // Look for location patterns in text
-  const bodyText = document.body.textContent;
-  const locationPatterns = [
-    /(?:Remote|Hybrid|On-site)/i,
-    /(?:[A-Z][a-z]+,\s*[A-Z]{2})/,
-    /(?:[A-Z][a-z]+\s+[A-Z][a-z]+,\s*[A-Z]{2})/
-  ];
-  
-  for (const pattern of locationPatterns) {
-    const match = bodyText.match(pattern);
-    if (match) {
-      return match[0];
-    }
-  }
-  
-  return '';
-}
-
-function extractSalary() {
-  const salaryPatterns = [
-    /\$[\d,]+(?:\s*-\s*\$?[\d,]+)?(?:\s*(?:per|\/)\s*(?:year|yr|hour|hr|annum))?/gi,
-    /[\d,]+k?\s*-\s*[\d,]+k?(?:\s*(?:per|\/)\s*(?:year|yr))?/gi,
-    /(?:salary|compensation|pay):\s*\$?[\d,]+/gi
-  ];
-  
-  const bodyText = document.body.textContent;
-  
-  for (const pattern of salaryPatterns) {
-    const match = bodyText.match(pattern);
-    if (match) {
-      return match[0];
-    }
-  }
-  
-  return '';
-}
-
-function extractAuthor() {
-  const selectors = [
-    '[rel="author"]',
-    '.author',
-    '[class*="author"]',
-    '[data-author]',
-    'meta[name="author"]',
-    'meta[property="article:author"]'
-  ];
-  
-  for (const selector of selectors) {
-    const element = document.querySelector(selector);
-    if (element) {
-      if (element.tagName === 'META') {
-        return element.content;
-      }
-      if (element.textContent.trim()) {
-        return element.textContent.trim();
-      }
-    }
-  }
-  
-  return '';
-}
-
-function extractDate() {
-  const selectors = [
-    'time',
-    '[datetime]',
-    '.date',
-    '.published',
-    '[class*="date"]',
-    '[class*="time"]',
-    'meta[property="article:published_time"]'
-  ];
-  
-  for (const selector of selectors) {
-    const element = document.querySelector(selector);
-    if (element) {
-      if (element.hasAttribute('datetime')) {
-        return element.getAttribute('datetime');
-      }
-      if (element.tagName === 'META') {
-        return element.content;
-      }
-      if (element.textContent.trim()) {
-        return element.textContent.trim();
-      }
-    }
-  }
-  
-  return '';
-}
-
-function extractDescription() {
-  const selectors = [
-    '[data-test="job-description"]',
-    '.description',
-    '.job-description',
-    'article p',
-    '.content p',
-    'meta[name="description"]',
-    'meta[property="og:description"]'
-  ];
-  
-  for (const selector of selectors) {
-    const element = document.querySelector(selector);
-    if (element) {
-      if (element.tagName === 'META') {
-        return element.content;
-      }
-      if (element.textContent.trim().length > 50) {
-        return element.textContent.trim().substring(0, 500) + '...';
-      }
-    }
-  }
-  
-  // Fallback to first substantial paragraph
-  const paragraphs = Array.from(document.querySelectorAll('p'));
-  for (const p of paragraphs) {
-    if (p.textContent.trim().length > 100) {
-      return p.textContent.trim().substring(0, 500) + '...';
-    }
-  }
-  
-  return '';
+  return null;
 }
 
 // Listen for messages from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.type === 'EXTRACT_DATA') {
+  if (request.type === 'START_INTERSECTION_OBSERVER') {
     try {
-      const extractedData = extractDataFromPage(request.extractFields);
-      sendResponse(extractedData);
+      initIntersectionObserver();
+      sendResponse({ success: true, message: 'Intersection Observer started' });
     } catch (error) {
-      console.error('Error extracting data:', error);
+      console.error('Error starting observer:', error);
+      sendResponse({ error: error.message });
+    }
+  } else if (request.type === 'EXTRACT_VIEWED_CONTENT') {
+    try {
+      const viewedContent = extractViewedContent();
+      sendResponse(viewedContent);
+    } catch (error) {
+      console.error('Error extracting viewed content:', error);
+      sendResponse({ error: error.message });
+    }
+  } else if (request.type === 'EXTRACT_READABILITY_CONTENT') {
+    try {
+      const readabilityContent = extractFullContentWithReadability();
+      sendResponse(readabilityContent);
+    } catch (error) {
+      console.error('Error extracting readability content:', error);
       sendResponse({ error: error.message });
     }
   }
@@ -285,8 +126,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 // Notify background when page is loaded
 if (document.readyState === 'complete') {
   notifyPageReady();
+  initIntersectionObserver();
 } else {
-  window.addEventListener('load', notifyPageReady);
+  window.addEventListener('load', () => {
+    notifyPageReady();
+    initIntersectionObserver();
+  });
 }
 
 function notifyPageReady() {
