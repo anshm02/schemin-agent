@@ -1,11 +1,10 @@
 import express, { Request, Response } from 'express';
 import cookieSession from 'cookie-session';
 import cors from 'cors';
-import { google } from 'googleapis';
 import { googleAuthService } from './services/googleAuth';
 import { tokenStorage } from './services/tokenStorage';
 import { gptService } from './services/gptService';
-import { googleDriveService } from './services/googleDrive';
+import { mcpServerService } from './services/mcpServer';
 import { phi3Service } from './services/readerService';
 
 const app = express();
@@ -221,28 +220,25 @@ app.post('/api/log-automation', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    const auth = await googleAuthService.getAuthenticatedClient(req.session.userId);
+    // Set current user for MCP service
+    mcpServerService.setCurrentUser(req.session.userId);
+    
     const targetFile = automation.storeTo;
     
-    // Analyze the target file format
-    const formatAnalysis = await googleDriveService.analyzeFileFormat(auth, targetFile);
+    // Analyze the target file format using MCP
+    const formatAnalysis = await mcpServerService.analyzeFileFormat(targetFile);
     
     if (formatAnalysis.fileType === 'sheet' && formatAnalysis.sheetFormat) {
       // Log to Google Sheet
-      const drive = google.drive({ version: 'v3', auth });
-      const searchResponse = await drive.files.list({
-        q: `name = '${targetFile.replace(/'/g, "\\'")}' and trashed = false`,
-        pageSize: 1,
-        fields: 'files(id)'
-      });
+      const files = await mcpServerService.searchFiles(targetFile, 1);
       
-      if (searchResponse.data.files && searchResponse.data.files.length > 0) {
-        const fileId = searchResponse.data.files[0].id!;
+      if (files && files.length > 0) {
+        const fileId = files[0].id;
         
         // Prepare data for sheet based on columns
         const sheetData = await prepareSheetData(data, formatAnalysis.sheetFormat);
         
-        await googleDriveService.appendToSheet(auth, fileId, sheetData);
+        await mcpServerService.appendToSheet(fileId, sheetData);
         
         res.json({ 
           success: true,
@@ -257,16 +253,11 @@ app.post('/api/log-automation', async (req: Request, res: Response) => {
       // Log to document (plain text format)
       const formattedEntry = formatDataForDoc(automation, data, url, timestamp);
       
-      const drive = google.drive({ version: 'v3', auth });
-      const searchResponse = await drive.files.list({
-        q: `name = '${targetFile.replace(/'/g, "\\'")}' and trashed = false`,
-        pageSize: 1,
-        fields: 'files(id)'
-      });
+      const files = await mcpServerService.searchFiles(targetFile, 1);
       
-      if (searchResponse.data.files && searchResponse.data.files.length > 0) {
-        const fileId = searchResponse.data.files[0].id!;
-        await googleDriveService.appendToDoc(auth, fileId, formattedEntry);
+      if (files && files.length > 0) {
+        const fileId = files[0].id;
+        await mcpServerService.appendToDoc(fileId, formattedEntry);
         
         res.json({ 
           success: true,
@@ -275,7 +266,7 @@ app.post('/api/log-automation', async (req: Request, res: Response) => {
         });
       } else {
         // Create new file if it doesn't exist
-        const result = await googleDriveService.appendToFile(auth, targetFile, formattedEntry);
+        const result = await mcpServerService.appendToFile(targetFile, formattedEntry);
         res.json({ 
           success: true,
           fileType: 'text',
@@ -350,9 +341,10 @@ app.post('/api/summarize-article', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    const auth = await googleAuthService.getAuthenticatedClient(req.session.userId);
+    // Set current user for MCP service
+    mcpServerService.setCurrentUser(req.session.userId);
     
-    const formatAnalysis = await googleDriveService.analyzeFileFormat(auth, targetFile);
+    const formatAnalysis = await mcpServerService.analyzeFileFormat(targetFile);
     
     if (formatAnalysis.fileType === 'sheet' && formatAnalysis.sheetFormat) {
       const sheetFormat = formatAnalysis.sheetFormat;
@@ -365,16 +357,11 @@ app.post('/api/summarize-article', async (req: Request, res: Response) => {
         sheetFormat
       );
       
-      const drive = google.drive({ version: 'v3', auth });
-      const searchResponse = await drive.files.list({
-        q: `name = '${targetFile.replace(/'/g, "\\'")}' and trashed = false`,
-        pageSize: 1,
-        fields: 'files(id)'
-      });
+      const files = await mcpServerService.searchFiles(targetFile, 1);
       
-      if (searchResponse.data.files && searchResponse.data.files.length > 0) {
-        const fileId = searchResponse.data.files[0].id!;
-        await googleDriveService.appendToSheet(auth, fileId, extractedData);
+      if (files && files.length > 0) {
+        const fileId = files[0].id;
+        await mcpServerService.appendToSheet(fileId, extractedData);
         
         res.json({ 
           success: true,
@@ -422,16 +409,11 @@ ${summary}
         );
       }
       
-      const drive = google.drive({ version: 'v3', auth });
-      const searchResponse = await drive.files.list({
-        q: `name = '${targetFile.replace(/'/g, "\\'")}' and trashed = false`,
-        pageSize: 1,
-        fields: 'files(id)'
-      });
+      const files = await mcpServerService.searchFiles(targetFile, 1);
       
-      if (searchResponse.data.files && searchResponse.data.files.length > 0) {
-        const fileId = searchResponse.data.files[0].id!;
-        await googleDriveService.appendToDoc(auth, fileId, summary);
+      if (files && files.length > 0) {
+        const fileId = files[0].id;
+        await mcpServerService.appendToDoc(fileId, summary);
         
         res.json({ 
           success: true,
@@ -468,7 +450,7 @@ ${summary}
 ========================================
 `;
 
-      const result = await googleDriveService.appendToFile(auth, targetFile, formattedEntry);
+      const result = await mcpServerService.appendToFile(targetFile, formattedEntry);
       
       res.json({ 
         success: true,
@@ -553,24 +535,21 @@ app.post('/api/process-content', async (req: Request, res: Response) => {
       });
     }
     
-    const auth = await googleAuthService.getAuthenticatedClient(req.session.userId);
+    // Set current user for MCP service
+    mcpServerService.setCurrentUser(req.session.userId);
+    
     const targetFile = automation.storeTo;
     const timestamp = content.timestamp || new Date().toISOString();
     
     console.log('✓ Writing to Google Drive:', targetFile);
     
-    const formatAnalysis = await googleDriveService.analyzeFileFormat(auth, targetFile);
+    const formatAnalysis = await mcpServerService.analyzeFileFormat(targetFile);
     
     if (formatAnalysis.fileType === 'sheet' && formatAnalysis.sheetFormat) {
-      const drive = google.drive({ version: 'v3', auth });
-      const searchResponse = await drive.files.list({
-        q: `name = '${targetFile.replace(/'/g, "\\'")}' and trashed = false`,
-        pageSize: 1,
-        fields: 'files(id)'
-      });
+      const files = await mcpServerService.searchFiles(targetFile, 1);
       
-      if (searchResponse.data.files && searchResponse.data.files.length > 0) {
-        const fileId = searchResponse.data.files[0].id!;
+      if (files && files.length > 0) {
+        const fileId = files[0].id;
         
         const dataForSheet = {
           ...extractedFields,
@@ -579,7 +558,7 @@ app.post('/api/process-content', async (req: Request, res: Response) => {
         };
         
         const sheetData = await prepareSheetData(dataForSheet, formatAnalysis.sheetFormat);
-        await googleDriveService.appendToSheet(auth, fileId, sheetData);
+        await mcpServerService.appendToSheet(fileId, sheetData);
         
         console.log('✓ Data written to Google Sheet');
         console.log('========================================\n');
@@ -602,16 +581,11 @@ app.post('/api/process-content', async (req: Request, res: Response) => {
     } else {
       const formattedEntry = formatDataForDoc(automation, extractedFields, content.url, timestamp);
       
-      const drive = google.drive({ version: 'v3', auth });
-      const searchResponse = await drive.files.list({
-        q: `name = '${targetFile.replace(/'/g, "\\'")}' and trashed = false`,
-        pageSize: 1,
-        fields: 'files(id)'
-      });
+      const files = await mcpServerService.searchFiles(targetFile, 1);
       
-      if (searchResponse.data.files && searchResponse.data.files.length > 0) {
-        const fileId = searchResponse.data.files[0].id!;
-        await googleDriveService.appendToDoc(auth, fileId, formattedEntry);
+      if (files && files.length > 0) {
+        const fileId = files[0].id;
+        await mcpServerService.appendToDoc(fileId, formattedEntry);
         
         console.log('✓ Data written to Google Doc');
         console.log('========================================\n');
@@ -627,7 +601,7 @@ app.post('/api/process-content', async (req: Request, res: Response) => {
           storageLocation: targetFile
         });
       } else {
-        const result = await googleDriveService.appendToFile(auth, targetFile, formattedEntry);
+        const result = await mcpServerService.appendToFile(targetFile, formattedEntry);
         
         console.log('✓ Data written to new file:', targetFile);
         console.log('========================================\n');

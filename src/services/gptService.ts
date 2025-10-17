@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import { googleAuthService } from './googleAuth';
-import { googleDriveService } from './googleDrive';
+import { mcpServerService } from './mcpServer';
 import { FormatAnalysis, SheetFormat, DocFormat } from '../types';
 
 const openai = new OpenAI({
@@ -140,20 +140,21 @@ Be conversational and helpful. Always confirm actions before making changes to f
 
         let toolResult: any;
         try {
-          const auth = await googleAuthService.getAuthenticatedClient(userId);
+          // Set current user for MCP service
+          mcpServerService.setCurrentUser(userId);
           
           switch (functionName) {
             case 'search_drive_files':
-              toolResult = await googleDriveService.searchFiles(auth, functionArgs);
+              toolResult = await mcpServerService.searchFiles(functionArgs.query, functionArgs.maxResults);
               break;
             case 'read_drive_file':
-              toolResult = await googleDriveService.getFileContent(auth, functionArgs.fileId);
+              toolResult = await mcpServerService.getFileContent(functionArgs.fileId);
               break;
             case 'edit_drive_file':
-              toolResult = await googleDriveService.editFile(auth, functionArgs);
+              toolResult = await mcpServerService.editFile(functionArgs.fileId, functionArgs.content, functionArgs.mimeType);
               break;
             case 'create_drive_file':
-              toolResult = await googleDriveService.createFile(auth, functionArgs);
+              toolResult = await mcpServerService.createFile(functionArgs.name, functionArgs.content, functionArgs.mimeType, functionArgs.parentFolderId);
               break;
             default:
               toolResult = { error: `Unknown function: ${functionName}` };
@@ -367,4 +368,3 @@ Create a summary entry that fits seamlessly with the existing content.`;
 }
 
 export const gptService = new GPTService();
-
