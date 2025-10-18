@@ -220,61 +220,24 @@ app.post('/api/log-automation', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    // Set current user for MCP service
-    mcpServerService.setCurrentUser(req.session.userId);
-    
-    const targetFile = automation.storeTo;
-    
-    // Analyze the target file format using MCP
-    const formatAnalysis = await mcpServerService.analyzeFileFormat(targetFile);
-    
-    if (formatAnalysis.fileType === 'sheet' && formatAnalysis.sheetFormat) {
-      // Log to Google Sheet
-      const files = await mcpServerService.searchFiles(targetFile, 1);
-      
-      if (files && files.length > 0) {
-        const fileId = files[0].id;
-        
-        // Prepare data for sheet based on columns
-        const sheetData = await prepareSheetData(data, formatAnalysis.sheetFormat);
-        
-        await mcpServerService.appendToSheet(fileId, sheetData);
-        
-        res.json({ 
-          success: true,
-          fileType: 'sheet',
-          message: `Data logged to ${targetFile}`,
-          data: sheetData
-        });
-      } else {
-        res.status(404).json({ error: 'Sheet not found. Please create it first.' });
-      }
-    } else {
-      // Log to document (plain text format)
-      const formattedEntry = formatDataForDoc(automation, data, url, timestamp);
-      
-      const files = await mcpServerService.searchFiles(targetFile, 1);
-      
-      if (files && files.length > 0) {
-        const fileId = files[0].id;
-        await mcpServerService.appendToDoc(fileId, formattedEntry);
-        
-        res.json({ 
-          success: true,
-          fileType: 'doc',
-          message: `Data logged to ${targetFile}`
-        });
-      } else {
-        // Create new file if it doesn't exist
-        const result = await mcpServerService.appendToFile(targetFile, formattedEntry);
-        res.json({ 
-          success: true,
-          fileType: 'text',
-          message: `Data logged to new file ${targetFile}`,
-          file: result
-        });
-      }
-    }
+    const webContent = {
+      title: data.pageTitle || 'Extracted Data',
+      url: url || data.pageUrl || 'Unknown URL',
+      content: JSON.stringify(data, null, 2),
+      timestamp: timestamp || new Date().toISOString()
+    };
+
+    const result = await gptService.processWebContent(
+      req.session.userId,
+      webContent,
+      automation
+    );
+
+    res.json({ 
+      success: result.success,
+      message: result.message,
+      details: result.details
+    });
   } catch (error) {
     console.error('Automation logging error:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -282,189 +245,6 @@ app.post('/api/log-automation', async (req: Request, res: Response) => {
   }
 });
 
-async function prepareSheetData(data: any, sheetFormat: any): Promise<string[]> {
-  const headers = sheetFormat.columns || [];
-  
-  console.log('Preparing sheet data:');
-  console.log('  Headers:', headers);
-  console.log('  Data:', data);
-  
-  if (headers.length === 0) {
-    console.log('  No headers found - creating data row from extracted fields');
-    
-    const dataKeys = Object.keys(data);
-    const dataValues = Object.values(data).map(v => String(v || 'Not detected'));
-    
-    console.log('  Auto-generated headers:', dataKeys);
-    console.log('  Data values:', dataValues);
-    console.log('  Final row:', dataValues);
-    
-    return dataValues;
-  }
-  
-  const mappedRow = await phi3Service.mapToSheetHeaders(data, headers);
-  
-  console.log('  Final row:', mappedRow);
-  
-  return mappedRow;
-}
-
-function formatDataForDoc(automation: any, data: any, url: string, timestamp: string): string {
-  let formatted = `
-========================================
-Automation: ${automation.title}
-Date: ${timestamp}
-URL: ${url}
-----------------------------------------
-`;
-  
-  for (const [key, value] of Object.entries(data)) {
-    if (key !== 'extractedAt' && key !== 'pageUrl' && key !== 'pageTitle') {
-      formatted += `${key.charAt(0).toUpperCase() + key.slice(1)}: ${value}\n`;
-    }
-  }
-  
-  formatted += `========================================\n\n`;
-  
-  return formatted;
-}
-
-app.post('/api/summarize-article', async (req: Request, res: Response) => {
-  try {
-    if (!req.session?.userId) {
-      return res.status(401).json({ error: 'Not authenticated' });
-    }
-
-    const { title, url, content, targetFile, scrollPercentage } = req.body;
-    
-    if (!title || !content || !targetFile) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
-
-    // Set current user for MCP service
-    mcpServerService.setCurrentUser(req.session.userId);
-    
-    const formatAnalysis = await mcpServerService.analyzeFileFormat(targetFile);
-    
-    if (formatAnalysis.fileType === 'sheet' && formatAnalysis.sheetFormat) {
-      const sheetFormat = formatAnalysis.sheetFormat;
-      
-      const extractedData = await gptService.extractForSheet(
-        title,
-        url,
-        content,
-        scrollPercentage || 100,
-        sheetFormat
-      );
-      
-      const files = await mcpServerService.searchFiles(targetFile, 1);
-      
-      if (files && files.length > 0) {
-        const fileId = files[0].id;
-        await mcpServerService.appendToSheet(fileId, extractedData);
-        
-        res.json({ 
-          success: true,
-          fileType: 'sheet',
-          extractedData,
-          message: 'Data added to sheet'
-        });
-      } else {
-        res.status(404).json({ error: 'Sheet not found' });
-      }
-    } else if (formatAnalysis.fileType === 'doc' && formatAnalysis.docFormat) {
-      const docFormat = formatAnalysis.docFormat;
-      
-      let summary: string;
-      if (formatAnalysis.isEmpty) {
-        const summaryPrompt = `Please provide a concise summary of the following article content. The user has read ${Math.round(scrollPercentage || 100)}% of this article.
-
-Title: ${title}
-URL: ${url}
-
-Content:
-${content}
-
-Provide a clear, structured summary that captures the key points and main ideas.`;
-
-        summary = await gptService.summarizeArticle(req.session.userId, summaryPrompt);
-        
-        const timestamp = new Date().toISOString();
-        summary = `========================================
-Date: ${timestamp}
-Title: ${title}
-URL: ${url}
-Read: ${Math.round(scrollPercentage || 100)}%
-
-Summary:
-${summary}
-========================================`;
-      } else {
-        summary = await gptService.summarizeForDoc(
-          title,
-          url,
-          content,
-          scrollPercentage || 100,
-          docFormat
-        );
-      }
-      
-      const files = await mcpServerService.searchFiles(targetFile, 1);
-      
-      if (files && files.length > 0) {
-        const fileId = files[0].id;
-        await mcpServerService.appendToDoc(fileId, summary);
-        
-        res.json({ 
-          success: true,
-          fileType: 'doc',
-          summary,
-          message: 'Summary added to document'
-        });
-      } else {
-        res.status(404).json({ error: 'Document not found' });
-      }
-    } else {
-      const summaryPrompt = `Please provide a concise summary of the following article content. The user has read ${Math.round(scrollPercentage || 100)}% of this article.
-
-Title: ${title}
-URL: ${url}
-
-Content:
-${content}
-
-Provide a clear, structured summary that captures the key points and main ideas.`;
-
-      const summary = await gptService.summarizeArticle(req.session.userId, summaryPrompt);
-      
-      const timestamp = new Date().toISOString();
-      const formattedEntry = `
-========================================
-Date: ${timestamp}
-Title: ${title}
-URL: ${url}
-Read: ${Math.round(scrollPercentage || 100)}%
-
-Summary:
-${summary}
-========================================
-`;
-
-      const result = await mcpServerService.appendToFile(targetFile, formattedEntry);
-      
-      res.json({ 
-        success: true,
-        fileType: 'text',
-        summary,
-        file: result
-      });
-    }
-  } catch (error) {
-    console.error('Article summarization error:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    res.status(500).json({ error: errorMessage });
-  }
-});
 
 app.post('/api/process-content', async (req: Request, res: Response) => {
   try {
@@ -512,113 +292,42 @@ app.post('/api/process-content', async (req: Request, res: Response) => {
       });
     }
     
-    console.log('✓ Content is RELEVANT - proceeding with field extraction');
-    
-    const extractedFields = await phi3Service.extractFields(
-      textContent,
-      automation.extract
-    );
-    
-    console.log('✓ EXTRACTION COMPLETE');
+    console.log('✓ Content is RELEVANT - proceeding with LLM processing');
     
     if (!req.session?.userId) {
       console.log('⚠️  User not authenticated - skipping Google Drive write');
       console.log('========================================\n');
       return res.json({
         relevant: true,
-        extractedFields,
         url: content.url,
         title: content.title,
         timestamp: content.timestamp || new Date().toISOString(),
         stored: false,
-        message: 'Data extracted but not stored. Please authenticate with Google Drive.'
+        message: 'Content is relevant but not stored. Please authenticate with Google Drive.'
       });
     }
-    
-    // Set current user for MCP service
-    mcpServerService.setCurrentUser(req.session.userId);
-    
-    const targetFile = automation.storeTo;
-    const timestamp = content.timestamp || new Date().toISOString();
-    
-    console.log('✓ Writing to Google Drive:', targetFile);
-    
-    const formatAnalysis = await mcpServerService.analyzeFileFormat(targetFile);
-    
-    if (formatAnalysis.fileType === 'sheet' && formatAnalysis.sheetFormat) {
-      const files = await mcpServerService.searchFiles(targetFile, 1);
-      
-      if (files && files.length > 0) {
-        const fileId = files[0].id;
-        
-        const dataForSheet = {
-          ...extractedFields,
-          url: content.url,
-          timestamp: timestamp
-        };
-        
-        const sheetData = await prepareSheetData(dataForSheet, formatAnalysis.sheetFormat);
-        await mcpServerService.appendToSheet(fileId, sheetData);
-        
-        console.log('✓ Data written to Google Sheet');
-        console.log('========================================\n');
-        
-        res.json({
-          relevant: true,
-          extractedFields,
-          url: content.url,
-          title: content.title,
-          timestamp: timestamp,
-          stored: true,
-          storageType: 'sheet',
-          storageLocation: targetFile
-        });
-      } else {
-        console.log('❌ Sheet not found:', targetFile);
-        console.log('========================================\n');
-        return res.status(404).json({ error: 'Sheet not found. Please create it first.' });
-      }
-    } else {
-      const formattedEntry = formatDataForDoc(automation, extractedFields, content.url, timestamp);
-      
-      const files = await mcpServerService.searchFiles(targetFile, 1);
-      
-      if (files && files.length > 0) {
-        const fileId = files[0].id;
-        await mcpServerService.appendToDoc(fileId, formattedEntry);
-        
-        console.log('✓ Data written to Google Doc');
-        console.log('========================================\n');
-        
-        res.json({
-          relevant: true,
-          extractedFields,
-          url: content.url,
-          title: content.title,
-          timestamp: timestamp,
-          stored: true,
-          storageType: 'doc',
-          storageLocation: targetFile
-        });
-      } else {
-        const result = await mcpServerService.appendToFile(targetFile, formattedEntry);
-        
-        console.log('✓ Data written to new file:', targetFile);
-        console.log('========================================\n');
-        
-        res.json({
-          relevant: true,
-          extractedFields,
-          url: content.url,
-          title: content.title,
-          timestamp: timestamp,
-          stored: true,
-          storageType: 'text',
-          storageLocation: targetFile,
-          fileId: result.id
-        });
-      }
-    }
+
+    const webContent = {
+      title: content.title,
+      url: content.url,
+      content: textContent,
+      timestamp: content.timestamp || new Date().toISOString()
+    };
+
+    const result = await gptService.processWebContent(
+      req.session.userId,
+      webContent,
+      automation
+    );
+
+    res.json({
+      relevant: true,
+      stored: result.success,
+      message: result.message,
+      details: result.details,
+      url: content.url,
+      title: content.title
+    });
     
   } catch (error) {
     console.error('Content processing error:', error);
