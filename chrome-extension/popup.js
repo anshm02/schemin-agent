@@ -151,10 +151,10 @@ function displayAutomations(automations, currentUrl, permissionsNeeded, serverUr
       </div>
       <div class="field">
         <span class="label">STORE TO:</span>
-        <span class="value">${automation.storeTo}</span>
+        <span class="value">${automation.googleFileName || automation.storeTo}${automation.googleFileId ? ' ✓' : ''}</span>
       </div>
       <button class="log-button" data-automation-id="${automation.id}">
-        📊 Log to ${automation.storeTo}
+        📊 Log to ${automation.googleFileName || automation.storeTo}
       </button>
       <div class="status" id="status-${automation.id}"></div>
     `;
@@ -329,7 +329,7 @@ async function handleExtractViewedContent() {
     console.log('====================================');
     
     if (processResult.stored) {
-      button.textContent = `✓ Saved to ${processResult.storageLocation}`;
+      button.textContent = `✓ Saved to ${automation.googleFileName || processResult.storageLocation || automation.storeTo}`;
     } else {
       button.textContent = '✓ Extracted (not stored)';
     }
@@ -447,7 +447,7 @@ async function handleExtractReadabilityContent() {
     console.log('====================================');
     
     if (processResult.stored) {
-      button.textContent = `✓ Saved to ${processResult.storageLocation}`;
+      button.textContent = `✓ Saved to ${automation.googleFileName || processResult.storageLocation || automation.storeTo}`;
     } else {
       button.textContent = '✓ Extracted (not stored)';
     }

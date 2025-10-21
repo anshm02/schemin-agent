@@ -1,6 +1,8 @@
 import express, { Request, Response } from 'express';
 import cookieSession from 'cookie-session';
 import cors from 'cors';
+import fs from 'fs';
+import path from 'path';
 import { googleAuthService } from './services/googleAuth';
 import { tokenStorage } from './services/tokenStorage';
 import { gptService } from './services/gptService';
@@ -8,6 +10,7 @@ import { mcpServerService } from './services/mcpServer';
 import { phi3Service } from './services/readerService';
 
 const app = express();
+const FILE_MAPPINGS_PATH = path.join(__dirname, '..', 'file-mappings.json');
 
 app.use(cors({
   origin: true,
@@ -198,14 +201,101 @@ app.get('/api/status', async (req: Request, res: Response) => {
 
 let globalAutomations: any[] = [];
 
+function loadFileMappings(): any {
+  try {
+    if (fs.existsSync(FILE_MAPPINGS_PATH)) {
+      const data = fs.readFileSync(FILE_MAPPINGS_PATH, 'utf8');
+      return JSON.parse(data);
+    }
+  } catch (error) {
+    console.error('Error loading file mappings:', error);
+  }
+  return { automations: {} };
+}
+
+function saveFileMappings(mappings: any): void {
+  try {
+    fs.writeFileSync(FILE_MAPPINGS_PATH, JSON.stringify(mappings, null, 2));
+  } catch (error) {
+    console.error('Error saving file mappings:', error);
+  }
+}
+
 app.post('/api/automations/sync', async (req: Request, res: Response) => {
   const { automations } = req.body;
   globalAutomations = automations || [];
+  
+  const mappings = loadFileMappings();
+  
+  for (const tab of automations) {
+    for (const automation of tab.automations) {
+      if (automation.googleFileId) {
+        mappings.automations[automation.id] = {
+          googleFileId: automation.googleFileId,
+          googleFileName: automation.googleFileName,
+          storeTo: automation.storeTo
+        };
+      }
+    }
+  }
+  
+  saveFileMappings(mappings);
+  
   res.json({ success: true });
 });
 
 app.get('/api/automations', async (req: Request, res: Response) => {
   res.json({ automations: globalAutomations });
+});
+
+app.get('/api/google-token', async (req: Request, res: Response) => {
+  try {
+    if (!req.session?.userId) {
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
+
+    const tokens = await tokenStorage.getTokens(req.session.userId);
+    if (!tokens) {
+      return res.status(401).json({ error: 'No tokens found' });
+    }
+
+    res.json({ accessToken: tokens.access_token });
+  } catch (error) {
+    console.error('Token fetch error:', error);
+    res.status(500).json({ error: 'Failed to get token' });
+  }
+});
+
+app.post('/api/create-drive-file', async (req: Request, res: Response) => {
+  try {
+    if (!req.session?.userId) {
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
+
+    const { name, mimeType } = req.body;
+    
+    if (!name) {
+      return res.status(400).json({ error: 'File name is required' });
+    }
+
+    mcpServerService.setCurrentUser(req.session.userId);
+    
+    const result = await mcpServerService.createFile(
+      name,
+      '',
+      mimeType || 'text/plain'
+    );
+
+    res.json({ 
+      success: true, 
+      fileId: result.id,
+      fileName: result.name
+    });
+  } catch (error) {
+    console.error('File creation error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    res.status(500).json({ error: errorMessage });
+  }
 });
 
 app.post('/api/log-automation', async (req: Request, res: Response) => {

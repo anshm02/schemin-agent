@@ -212,6 +212,8 @@ Be conversational and helpful. Always confirm actions before making changes to f
       storeTo: string;
       extract?: string[];
       automationPrompt?: string;
+      googleFileId?: string;
+      googleFileName?: string;
     }
   ): Promise<{ success: boolean; message: string; details?: any }> {
     console.log('\n========================================');
@@ -232,6 +234,10 @@ Be conversational and helpful. Always confirm actions before making changes to f
 
     mcpServerService.setCurrentUser(userId);
 
+    const fileIdInstruction = automation.googleFileId 
+      ? `Use file ID: ${automation.googleFileId} (File name: ${automation.googleFileName || 'Unknown'})` 
+      : `Search for file named: ${automation.storeTo}`;
+
     const userPrompt = `You are an intelligent automation assistant processing web content to store in Google Drive.
 
 WEB CONTENT:
@@ -244,25 +250,24 @@ ${webContent.content}
 
 AUTOMATION TASK:
 Automation Name: ${automation.title}
-Target File: ${automation.storeTo}
+Target File: ${fileIdInstruction}
 ${automation.extract ? `Fields to Extract: ${Array.isArray(automation.extract) ? automation.extract.join(', ') : automation.extract}` : ''}
 ${automation.automationPrompt ? `Custom Instructions: ${automation.automationPrompt}` : ''}
 
 YOUR TASK:
-1. First, search for the target file "${automation.storeTo}" in Google Drive
-2. If the file exists, read its content to understand the existing format and structure
-3. Based on the file type (Google Sheet, Google Doc, or plain text):
+${automation.googleFileId ? `1. Read the file with ID ${automation.googleFileId} to understand the existing format and structure` : `1. Search for the file "${automation.storeTo}" in Google Drive`}
+2. ${automation.googleFileId ? 'Based' : 'If the file exists, read its content. Based'} on the file type (Google Sheet, Google Doc, or plain text):
    - For Google Sheets: Analyze the column headers and existing data format, then append a new row with the extracted information
    - For Google Docs: Analyze the writing style and structure of existing entries, then append a new entry that matches the style
    - For plain text files: Append the content in an appropriate format
-4. ${automation.automationPrompt ? 'Follow the custom instructions provided.' : 'Match the existing format and structure of the document.'}
-5. Extract relevant information from the web content and format it appropriately
-6. Append the new entry to the file
+3. ${automation.automationPrompt ? 'Follow the custom instructions provided.' : 'Match the existing format and structure of the document.'}
+4. Extract relevant information from the web content and format it appropriately
+5. Append the new entry to the file
 
 Important:
 - Always analyze existing content before adding new content
 - Maintain consistency with the existing format and style
-- If the file doesn't exist, create it with an appropriate structure
+${automation.googleFileId ? '- You MUST use the provided file ID, do not search for or edit any other files' : '- If the file doesn\'t exist, create it with an appropriate structure'}
 - For sheets, ensure data is properly formatted for each column
 - For docs, maintain the same writing style and structure as existing entries`;
 
@@ -271,16 +276,19 @@ Important:
       content: `You are an intelligent automation assistant that processes web content and stores it in Google Drive.
 
 You have access to Google Drive tools to:
-- Search for files
+- Search for files (only if no file ID is provided)
 - Read file contents
 - Edit existing files
-- Create new files
+- Create new files (only if no file ID is provided)
 
 When processing web content:
-1. Always analyze the target file first to understand its format
-2. Extract relevant information from the web content
-3. Format the data to match the existing file structure
-4. Append the new entry maintaining consistency with existing content
+1. If a file ID is provided, use ONLY that file ID and do not search for or edit any other files
+2. Always analyze the target file first to understand its format
+3. Extract relevant information from the web content
+4. Format the data to match the existing file structure
+5. Append the new entry maintaining consistency with existing content
+
+CRITICAL: If a file ID is provided in the user prompt, you MUST use that exact file ID and never search for files by name.
 
 Be thorough in your analysis and ensure data is properly formatted.`
     };
@@ -290,7 +298,7 @@ Be thorough in your analysis and ensure data is properly formatted.`
         type: 'function',
         function: {
           name: 'search_drive_files',
-          description: 'Search for files in Google Drive by name or content',
+          description: 'Search for files in Google Drive by name or content. ONLY use this if no file ID was provided in the user prompt.',
           parameters: {
             type: 'object',
             properties: {
@@ -353,7 +361,7 @@ Be thorough in your analysis and ensure data is properly formatted.`
         type: 'function',
         function: {
           name: 'create_drive_file',
-          description: 'Create a new file in Google Drive',
+          description: 'Create a new file in Google Drive. ONLY use this if no file ID was provided in the user prompt.',
           parameters: {
             type: 'object',
             properties: {
