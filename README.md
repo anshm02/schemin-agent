@@ -2,6 +2,10 @@
 
 A smart automation system for tracking web content and logging data to Google Drive. Create automations using natural language, then capture data from any website with a single click.
 
+<img width="1435" height="717" alt="Screenshot 2025-10-29 at 11 09 39 AM" src="https://github.com/user-attachments/assets/83713037-10f0-4a85-8a6d-3b2413f1cdf4" />
+
+<img width="956" height="646" alt="Screenshot 2025-10-29 at 11 11 15 AM" src="https://github.com/user-attachments/assets/939bad54-3b99-42b0-bbc0-dedae03a14d6" />
+
 ## Overview
 
 The system consists of three components:
