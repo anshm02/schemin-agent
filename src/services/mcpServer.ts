@@ -50,43 +50,43 @@ export class MCPServerService {
           return result;
         
         case 'create_drive_file':
-          console.log(`[MCP] 📝 Creating file: ${args.name}`);
+          console.log(`[MCP] Creating file: ${args.name}`);
           result = await googleDriveService.createFile(auth, args);
           console.log(`[MCP] ✓ File created with ID: ${result.id}`);
           return result;
         
         case 'get_sheet_format':
-          console.log(`[MCP] 📊 Analyzing sheet format...`);
+          console.log(`[MCP] Analyzing sheet format...`);
           result = await googleDriveService.getSheetFormat(auth, args.fileId);
           console.log(`[MCP] ✓ Sheet has ${result.headers.length} columns, ${result.rowCount} rows`);
           return result;
         
         case 'append_to_sheet':
-          console.log(`[MCP] 📝 Appending row to sheet (${args.values.length} values)`);
+          console.log(`[MCP] Appending row to sheet (${args.values.length} values)`);
           await googleDriveService.appendToSheet(auth, args.fileId, args.values);
           console.log(`[MCP] ✓ Row appended successfully via MCP`);
           return { success: true, message: 'Row appended successfully' };
         
         case 'get_doc_format':
-          console.log(`[MCP] 📄 Analyzing doc format...`);
+          console.log(`[MCP] Analyzing doc format...`);
           result = await googleDriveService.getDocFormat(auth, args.fileId);
           console.log(`[MCP] ✓ Doc style: ${result.style}, structure: ${result.structure}`);
           return result;
         
         case 'append_to_doc':
-          console.log(`[MCP] 📝 Appending to doc (${args.content.length} chars)`);
+          console.log(`[MCP] Appending to doc (${args.content.length} chars)`);
           await googleDriveService.appendToDoc(auth, args.fileId, args.content);
           console.log(`[MCP] ✓ Content appended to doc via MCP`);
           return { success: true, message: 'Content appended successfully' };
         
         case 'analyze_file_format':
-          console.log(`[MCP] 🔍 Analyzing file format: ${args.fileName}`);
+          console.log(`[MCP] Analyzing file format: ${args.fileName}`);
           result = await googleDriveService.analyzeFileFormat(auth, args.fileName);
           console.log(`[MCP] ✓ File type: ${result.fileType}, isEmpty: ${result.isEmpty}`);
           return result;
         
         case 'append_to_file':
-          console.log(`[MCP] 📝 Appending to file: ${args.fileName}`);
+          console.log(`[MCP] Appending to file: ${args.fileName}`);
           result = await googleDriveService.appendToFile(auth, args.fileName, args.content);
           console.log(`[MCP] ✓ Content appended to file via MCP`);
           return result;

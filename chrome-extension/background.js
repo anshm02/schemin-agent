@@ -1,6 +1,9 @@
 // Background service worker for Schemin automation
 
 let pageStates = new Map();
+let cachedAutomations = [];
+let lastFetchTime = 0;
+const CACHE_DURATION = 5000; // 5 seconds
 
 // Listen for page ready notifications
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -21,10 +24,32 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   pageStates.delete(tabId);
 });
 
+// Fetch automations from server with caching
+async function fetchAutomationsFromServer() {
+  const now = Date.now();
+  if (cachedAutomations.length > 0 && (now - lastFetchTime) < CACHE_DURATION) {
+    return cachedAutomations;
+  }
+  
+  try {
+    const response = await fetch('http://localhost:3000/api/automations', {
+      credentials: 'include'
+    });
+    const result = await response.json();
+    cachedAutomations = result.automations || [];
+    lastFetchTime = now;
+    return cachedAutomations;
+  } catch (error) {
+    console.error('Error fetching automations:', error);
+    return [];
+  }
+}
+
+// Check if there are applicable automations for the current tab
 async function checkApplicableAutomations(tabId, url) {
   try {
-    const data = await chrome.storage.local.get(['schemin_automations']);
-    const automations = data.schemin_automations || [];
+    // Fetch data from server (with caching)
+    const automations = await fetchAutomationsFromServer();
     
     const currentDomain = new URL(url).hostname;
     let hasApplicable = false;
@@ -51,6 +76,8 @@ async function checkApplicableAutomations(tabId, url) {
   }
 }
 
+// Check if the current domain matches any of the sources
+// security risk: false positive if the sources are not exact matches
 function isDomainMatch(currentDomain, sources) {
   const sourceDomains = sources
     .toLowerCase()

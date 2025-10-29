@@ -366,34 +366,15 @@ app.post('/api/process-content', async (req: Request, res: Response) => {
     console.log(textContent.substring(0, 500));
     console.log('...\n');
     
-    const isRelevant = await phi3Service.classifyIntent(
-      textContent,
-      automation.title,
-      automation.extract
-    );
-    
-    if (!isRelevant) {
-      console.log('Content deemed NOT RELEVANT by model');
-      console.log('========================================\n');
-      return res.json({
-        relevant: false,
-        message: 'Content is not relevant to the automation intent',
-        contentPreview: textContent.substring(0, 500)
-      });
-    }
-    
-    console.log('✓ Content is RELEVANT - proceeding with LLM processing');
-    
     if (!req.session?.userId) {
       console.log('⚠️  User not authenticated - skipping Google Drive write');
       console.log('========================================\n');
       return res.json({
-        relevant: true,
         url: content.url,
         title: content.title,
         timestamp: content.timestamp || new Date().toISOString(),
         stored: false,
-        message: 'Content is relevant but not stored. Please authenticate with Google Drive.'
+        message: 'Content not stored. Please authenticate with Google Drive.'
       });
     }
 
@@ -416,7 +397,10 @@ app.post('/api/process-content', async (req: Request, res: Response) => {
       message: result.message,
       details: result.details,
       url: content.url,
-      title: content.title
+      title: content.title,
+      extractedFields: automation.extract,
+      storageType: automation.storeTo,
+      storageLocation: automation.googleFileName || automation.storeTo
     });
     
   } catch (error) {

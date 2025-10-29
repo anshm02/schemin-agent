@@ -109,7 +109,7 @@ function displayAutomations(automations, currentUrl, permissionsNeeded, serverUr
     const permissionDiv = document.createElement('div');
     permissionDiv.className = 'permission-request';
     permissionDiv.innerHTML = `
-      <div style="font-weight: 600; margin-bottom: 4px;">⚠️ Permission Required</div>
+      <div style="font-weight: 600; margin-bottom: 4px;">Permission Required</div>
       <div style="margin-bottom: 8px;">Grant access to track content from these sites.</div>
       <button id="grantPermissions">Grant Permissions</button>
     `;
@@ -173,16 +173,16 @@ async function handleLogClick(automation, currentUrl, serverUrl) {
   const statusDiv = document.getElementById(`status-${automation.id}`);
   
   button.disabled = true;
-  button.textContent = '⏳ Extracting data...';
+  button.textContent = 'Extracting data...';
   
   try {
     throw new Error('Old extraction method deprecated. Use the new extraction buttons below.');
     
   } catch (error) {
     console.error('Error logging data:', error);
-    showStatus(statusDiv, '❌ Error: ' + error.message, 'error');
+    showStatus(statusDiv, 'Error: ' + error.message, 'error');
     button.disabled = false;
-    button.textContent = '📊 Log to ' + automation.storeTo;
+    button.textContent = 'Log to ' + automation.storeTo;
   }
 }
 
@@ -245,11 +245,11 @@ async function handleExtractViewedContent() {
       type: 'START_INTERSECTION_OBSERVER'
     });
     
-    button.textContent = '⏳ Tracking... (scroll the page)';
+    button.textContent = 'Tracking... (scroll the page)';
     
     await new Promise(resolve => setTimeout(resolve, 3000));
     
-    button.textContent = '⏳ Extracting viewed content...';
+    button.textContent = 'Extracting viewed content...';
     
     const extractedContent = await chrome.tabs.sendMessage(tab.id, {
       type: 'EXTRACT_VIEWED_CONTENT'
@@ -259,7 +259,7 @@ async function handleExtractViewedContent() {
       throw new Error('No viewed content found');
     }
     
-    button.textContent = '⏳ Processing with Phi-3...';
+    button.textContent = 'Processing with Phi-3...';
     
     const currentUrl = new URL(tab.url);
     const currentDomain = currentUrl.hostname;
@@ -282,7 +282,7 @@ async function handleExtractViewedContent() {
     }
     
     if (applicableAutomations.length === 0) {
-      button.textContent = '⚠️ No automation for this site';
+      button.textContent = '  No automation for this site';
       setTimeout(() => {
         button.textContent = originalText;
         button.disabled = false;
@@ -306,7 +306,7 @@ async function handleExtractViewedContent() {
     const processResult = await processResponse.json();
     
     if (!processResult.relevant) {
-      button.textContent = '❌ Content not relevant';
+      button.textContent = 'Content not relevant';
       setTimeout(() => {
         button.textContent = originalText;
         button.disabled = false;
@@ -341,7 +341,7 @@ async function handleExtractViewedContent() {
     
   } catch (error) {
     console.error('Error extracting viewed content:', error);
-    button.textContent = '❌ Error: ' + error.message;
+    button.textContent = 'Error: ' + error.message;
     setTimeout(() => {
       button.textContent = originalText;
       button.disabled = false;
@@ -355,7 +355,7 @@ async function handleExtractReadabilityContent() {
   
   try {
     button.disabled = true;
-    button.textContent = '⏳ Extracting with Readability...';
+    button.textContent = 'Extracting with Readability...';
     
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     
@@ -377,7 +377,7 @@ async function handleExtractReadabilityContent() {
       throw new Error('Failed to extract content with Readability');
     }
     
-    button.textContent = '⏳ Processing with Phi-3...';
+    button.textContent = 'Processing with Phi-3...';
     
     const currentUrl = new URL(tab.url);
     const currentDomain = currentUrl.hostname;
@@ -400,7 +400,7 @@ async function handleExtractReadabilityContent() {
     }
     
     if (applicableAutomations.length === 0) {
-      button.textContent = '⚠️ No automation for this site';
+      button.textContent = 'No automation for this site';
       setTimeout(() => {
         button.textContent = originalText;
         button.disabled = false;
@@ -424,7 +424,7 @@ async function handleExtractReadabilityContent() {
     const processResult = await processResponse.json();
     
     if (!processResult.relevant) {
-      button.textContent = '❌ Content not relevant';
+      button.textContent = 'Content not relevant';
       setTimeout(() => {
         button.textContent = originalText;
         button.disabled = false;
@@ -459,7 +459,7 @@ async function handleExtractReadabilityContent() {
     
   } catch (error) {
     console.error('Error extracting readability content:', error);
-    button.textContent = '❌ Error: ' + error.message;
+    button.textContent = 'Error: ' + error.message;
     setTimeout(() => {
       button.textContent = originalText;
       button.disabled = false;
