@@ -1,152 +1,145 @@
-let articleData = {
-  url: window.location.href,
-  title: document.title,
-  fullContent: '',
-  readContent: '',
-  scrollPercentage: 0,
-  lastScrollPosition: 0,
-  isArticle: false
-};
+// Intersection Observer tracking for viewed content
+let viewedElements = new Set();
+let observer = null;
 
-function isArticlePage() {
-  const articleSelectors = [
-    'article',
-    '[role="article"]',
-    '.article',
-    '.post',
-    '.entry-content',
-    '.post-content',
-    '.article-content',
-    'main article',
-    '[itemtype*="Article"]'
-  ];
-  
-  for (const selector of articleSelectors) {
-    if (document.querySelector(selector)) {
-      return true;
-    }
+function initIntersectionObserver() {
+  if (observer) {
+    observer.disconnect();
   }
   
-  const url = window.location.href;
-  const articlePatterns = [
-    /\/article\//i,
-    /\/post\//i,
-    /\/news\//i,
-    /\/blog\//i,
-    /\/story\//i,
-    /\d{4}\/\d{2}\/\d{2}\//
-  ];
+  viewedElements = new Set();
   
-  return articlePatterns.some(pattern => pattern.test(url));
-}
-
-function getArticleContent() {
-  const articleSelectors = [
-    'article',
-    '[role="article"]',
-    '.article',
-    '.post',
-    '.entry-content',
-    '.post-content',
-    '.article-content',
-    'main article'
-  ];
-  
-  for (const selector of articleSelectors) {
-    const element = document.querySelector(selector);
-    if (element) {
-      return element;
-    }
-  }
-  
-  const main = document.querySelector('main');
-  if (main) return main;
-  
-  return document.body;
-}
-
-function extractTextContent(element) {
-  const clone = element.cloneNode(true);
-  
-  const unwanted = clone.querySelectorAll('script, style, nav, header, footer, aside, .ad, .advertisement, .social-share, .comments');
-  unwanted.forEach(el => el.remove());
-  
-  return clone.innerText.trim();
-}
-
-function calculateScrollPercentage() {
-  const windowHeight = window.innerHeight;
-  const documentHeight = document.documentElement.scrollHeight;
-  const scrollTop = window.scrollY || document.documentElement.scrollTop;
-  
-  const scrollableHeight = documentHeight - windowHeight;
-  const percentage = scrollableHeight > 0 ? (scrollTop / scrollableHeight) * 100 : 100;
-  
-  return Math.min(100, Math.max(0, percentage));
-}
-
-function getReadContent() {
-  const articleElement = getArticleContent();
-  if (!articleElement) return '';
-  
-  const fullText = extractTextContent(articleElement);
-  const paragraphs = fullText.split('\n').filter(p => p.trim().length > 0);
-  
-  const scrollPercentage = calculateScrollPercentage();
-  const readParagraphCount = Math.ceil(paragraphs.length * (scrollPercentage / 100));
-  
-  return paragraphs.slice(0, readParagraphCount).join('\n\n');
-}
-
-function updateArticleData() {
-  if (!articleData.isArticle) return;
-  
-  const articleElement = getArticleContent();
-  if (articleElement) {
-    articleData.fullContent = extractTextContent(articleElement);
-    articleData.scrollPercentage = calculateScrollPercentage();
-    articleData.readContent = getReadContent();
-    articleData.lastScrollPosition = window.scrollY;
-  }
-}
-
-function initialize() {
-  articleData.isArticle = isArticlePage();
-  
-  if (articleData.isArticle) {
-    updateArticleData();
-    
-    let scrollTimeout;
-    window.addEventListener('scroll', () => {
-      clearTimeout(scrollTimeout);
-      scrollTimeout = setTimeout(updateArticleData, 200);
-    });
-    
-    chrome.runtime.sendMessage({
-      type: 'ARTICLE_DETECTED',
-      data: {
-        url: articleData.url,
-        title: articleData.title,
-        isArticle: articleData.isArticle
+  observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting && entry.intersectionRatio >= 0.5) {
+        viewedElements.add(entry.target);
       }
     });
-  }
+  }, {
+    threshold: [0.5]
+  });
+  
+  const selectorsToObserve = [
+    'article',
+    'main',
+    'section',
+    '[role="article"]',
+    '[role="main"]',
+    '.job-card',
+    '.post',
+    '.content',
+    'p',
+    'h1',
+    'h2',
+    'h3',
+    'div[class*="card"]',
+    'li[class*="item"]'
+  ];
+  
+  selectorsToObserve.forEach(selector => {
+    document.querySelectorAll(selector).forEach(element => {
+      observer.observe(element);
+    });
+  });
 }
 
+function extractViewedContent() {
+  const viewedContent = {
+    url: window.location.href,
+    title: document.title,
+    timestamp: new Date().toISOString(),
+    viewedElements: []
+  };
+  
+  viewedElements.forEach(element => {
+    const tagName = element.tagName.toLowerCase();
+    const className = element.className || '';
+    const id = element.id || '';
+    const text = element.textContent.trim();
+    const html = element.outerHTML;
+    
+    if (text.length > 0) {
+      viewedContent.viewedElements.push({
+        tagName,
+        className,
+        id,
+        text: text.substring(0, 1000),
+        html: html.substring(0, 2000)
+      });
+    }
+  });
+  
+  return viewedContent;
+}
+
+function extractFullContentWithReadability() {
+  const documentClone = document.cloneNode(true);
+  const article = new Readability(documentClone).parse();
+  
+  if (article) {
+    return {
+      url: window.location.href,
+      timestamp: new Date().toISOString(),
+      title: article.title,
+      byline: article.byline,
+      excerpt: article.excerpt,
+      siteName: article.siteName,
+      textContent: article.textContent,
+      htmlContent: article.content,
+      length: article.length
+    };
+  }
+  
+  return null;
+}
+
+// Listen for messages from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.type === 'GET_ARTICLE_DATA') {
-    updateArticleData();
-    sendResponse(articleData);
-  } else if (request.type === 'TAB_DEACTIVATED') {
-    updateArticleData();
-    sendResponse(articleData);
+  if (request.type === 'START_INTERSECTION_OBSERVER') {
+    try {
+      initIntersectionObserver();
+      sendResponse({ success: true, message: 'Intersection Observer started' });
+    } catch (error) {
+      console.error('Error starting observer:', error);
+      sendResponse({ error: error.message });
+    }
+  } else if (request.type === 'EXTRACT_VIEWED_CONTENT') {
+    try {
+      const viewedContent = extractViewedContent();
+      sendResponse(viewedContent);
+    } catch (error) {
+      console.error('Error extracting viewed content:', error);
+      sendResponse({ error: error.message });
+    }
+  } else if (request.type === 'EXTRACT_READABILITY_CONTENT') {
+    try {
+      const readabilityContent = extractFullContentWithReadability();
+      sendResponse(readabilityContent);
+    } catch (error) {
+      console.error('Error extracting readability content:', error);
+      sendResponse({ error: error.message });
+    }
   }
   return true;
 });
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initialize);
+// Notify background when page is loaded
+if (document.readyState === 'complete') {
+  notifyPageReady();
+  initIntersectionObserver();
 } else {
-  initialize();
+  window.addEventListener('load', () => {
+    notifyPageReady();
+    initIntersectionObserver();
+  });
 }
 
+function notifyPageReady() {
+  chrome.runtime.sendMessage({
+    type: 'PAGE_READY',
+    url: window.location.href,
+    title: document.title
+  }).catch(() => {
+    // Ignore errors if background script isn't ready
+  });
+}

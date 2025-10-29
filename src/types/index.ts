@@ -37,17 +37,6 @@ export interface DriveCreateParams {
   parentFolderId?: string;
 }
 
-export interface MCPToolCall {
-  tool: string;
-  parameters: Record<string, any>;
-}
-
-export interface MCPResponse {
-  success: boolean;
-  data?: any;
-  error?: string;
-}
-
 export interface SheetFormat {
   sheetId: string;
   sheetName: string;

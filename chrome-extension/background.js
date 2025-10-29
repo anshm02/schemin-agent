@@ -1,104 +1,111 @@
-let activeTabId = null;
-let articleTabs = new Map();
+// Background service worker for Schemin automation
 
-chrome.tabs.onActivated.addListener(async (activeInfo) => {
-  const previousTabId = activeTabId;
-  activeTabId = activeInfo.tabId;
-  
-  if (previousTabId && articleTabs.has(previousTabId)) {
-    try {
-      const [tab] = await chrome.tabs.query({ active: false, lastFocusedWindow: false });
-      
-      chrome.tabs.sendMessage(previousTabId, { type: 'TAB_DEACTIVATED' }, async (response) => {
-        if (chrome.runtime.lastError) {
-          console.log('Tab not accessible:', chrome.runtime.lastError.message);
-          return;
-        }
-        
-        if (response && response.isArticle && response.readContent && response.readContent.length > 100) {
-          const settings = await chrome.storage.local.get(['targetFile', 'serverUrl', 'autoSummarize']);
-          
-          if (settings.autoSummarize && settings.targetFile) {
-            await sendSummaryRequest(response, settings);
-          }
-        }
-      });
-    } catch (error) {
-      console.error('Error handling tab deactivation:', error);
-    }
-  }
-});
+let pageStates = new Map();
+let cachedAutomations = [];
+let lastFetchTime = 0;
+const CACHE_DURATION = 5000; // 5 seconds
 
+// Listen for page ready notifications
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.type === 'ARTICLE_DETECTED') {
-    if (sender.tab && sender.tab.id) {
-      articleTabs.set(sender.tab.id, request.data);
-    }
-  } else if (request.type === 'MANUAL_SUMMARIZE') {
-    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
-      if (tabs[0]) {
-        chrome.tabs.sendMessage(tabs[0].id, { type: 'GET_ARTICLE_DATA' }, async (response) => {
-          if (response && response.isArticle) {
-            const settings = await chrome.storage.local.get(['targetFile', 'serverUrl']);
-            await sendSummaryRequest(response, settings);
-            sendResponse({ success: true });
-          } else {
-            sendResponse({ success: false, error: 'Not an article page' });
-          }
-        });
-      }
+  if (request.type === 'PAGE_READY' && sender.tab) {
+    pageStates.set(sender.tab.id, {
+      url: request.url,
+      title: request.title,
+      tabId: sender.tab.id
     });
-    return true;
+    
+    // Check if there are applicable automations
+    checkApplicableAutomations(sender.tab.id, request.url);
   }
 });
 
-async function sendSummaryRequest(articleData, settings) {
-  const serverUrl = settings.serverUrl || 'http://localhost:3000';
+// Clean up when tabs are closed
+chrome.tabs.onRemoved.addListener((tabId) => {
+  pageStates.delete(tabId);
+});
+
+// Fetch automations from server with caching
+async function fetchAutomationsFromServer() {
+  const now = Date.now();
+  if (cachedAutomations.length > 0 && (now - lastFetchTime) < CACHE_DURATION) {
+    return cachedAutomations;
+  }
   
   try {
-    const response = await fetch(`${serverUrl}/api/summarize-article`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
-      body: JSON.stringify({
-        title: articleData.title,
-        url: articleData.url,
-        content: articleData.readContent,
-        targetFile: settings.targetFile,
-        scrollPercentage: articleData.scrollPercentage
-      })
+    const response = await fetch('http://localhost:3000/api/automations', {
+      credentials: 'include'
     });
-    
-    if (!response.ok) {
-      throw new Error(`Server responded with ${response.status}`);
-    }
-    
     const result = await response.json();
-    console.log('Summary saved successfully:', result);
-    
-    chrome.notifications.create({
-      type: 'basic',
-      iconUrl: 'icon48.png',
-      title: 'Article Summarized',
-      message: `Summary saved to ${settings.targetFile}`,
-      priority: 2
-    });
+    cachedAutomations = result.automations || [];
+    lastFetchTime = now;
+    return cachedAutomations;
   } catch (error) {
-    console.error('Failed to send summary request:', error);
-    
-    chrome.notifications.create({
-      type: 'basic',
-      iconUrl: 'icon48.png',
-      title: 'Summary Failed',
-      message: 'Could not save summary. Check server connection.',
-      priority: 2
-    });
+    console.error('Error fetching automations:', error);
+    return [];
   }
 }
 
-chrome.tabs.onRemoved.addListener((tabId) => {
-  articleTabs.delete(tabId);
+// Check if there are applicable automations for the current tab
+async function checkApplicableAutomations(tabId, url) {
+  try {
+    // Fetch data from server (with caching)
+    const automations = await fetchAutomationsFromServer();
+    
+    const currentDomain = new URL(url).hostname;
+    let hasApplicable = false;
+    
+    for (const tabData of automations) {
+      for (const automation of tabData.automations) {
+        if (isDomainMatch(currentDomain, automation.sources)) {
+          hasApplicable = true;
+          break;
+        }
+      }
+      if (hasApplicable) break;
+    }
+    
+    // Update badge if automations are applicable
+    if (hasApplicable) {
+      chrome.action.setBadgeText({ text: '●', tabId: tabId });
+      chrome.action.setBadgeBackgroundColor({ color: '#5B5FED', tabId: tabId });
+    } else {
+      chrome.action.setBadgeText({ text: '', tabId: tabId });
+    }
+  } catch (error) {
+    console.error('Error checking automations:', error);
+  }
+}
+
+// Check if the current domain matches any of the sources
+// security risk: false positive if the sources are not exact matches
+function isDomainMatch(currentDomain, sources) {
+  const sourceDomains = sources
+    .toLowerCase()
+    .split(',')
+    .map(s => s.trim())
+    .map(s => s.replace(/^(https?:\/\/)?(www\.)?/, ''))
+    .map(s => s.split('/')[0]);
+  
+  return sourceDomains.some(domain => {
+    return currentDomain.includes(domain) || domain.includes(currentDomain);
+  });
+}
+
+// Listen for tab activation to update badge
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
+  try {
+    const tab = await chrome.tabs.get(activeInfo.tabId);
+    if (tab.url) {
+      await checkApplicableAutomations(tab.id, tab.url);
+    }
+  } catch (error) {
+    console.error('Error on tab activation:', error);
+  }
 });
 
+// Listen for tab updates to update badge
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  if (changeInfo.status === 'complete' && tab.url) {
+    await checkApplicableAutomations(tabId, tab.url);
+  }
+});

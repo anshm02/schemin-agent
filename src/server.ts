@@ -1,13 +1,16 @@
 import express, { Request, Response } from 'express';
 import cookieSession from 'cookie-session';
 import cors from 'cors';
-import { google } from 'googleapis';
+import fs from 'fs';
+import path from 'path';
 import { googleAuthService } from './services/googleAuth';
 import { tokenStorage } from './services/tokenStorage';
 import { gptService } from './services/gptService';
-import { googleDriveService } from './services/googleDrive';
+import { mcpServerService } from './services/mcpServer';
+import { phi3Service } from './services/readerService';
 
 const app = express();
+const FILE_MAPPINGS_PATH = path.join(__dirname, '..', 'file-mappings.json');
 
 app.use(cors({
   origin: true,
@@ -196,147 +199,212 @@ app.get('/api/status', async (req: Request, res: Response) => {
   }
 });
 
-app.post('/api/summarize-article', async (req: Request, res: Response) => {
+let globalAutomations: any[] = [];
+
+function loadFileMappings(): any {
+  try {
+    if (fs.existsSync(FILE_MAPPINGS_PATH)) {
+      const data = fs.readFileSync(FILE_MAPPINGS_PATH, 'utf8');
+      return JSON.parse(data);
+    }
+  } catch (error) {
+    console.error('Error loading file mappings:', error);
+  }
+  return { automations: {} };
+}
+
+function saveFileMappings(mappings: any): void {
+  try {
+    fs.writeFileSync(FILE_MAPPINGS_PATH, JSON.stringify(mappings, null, 2));
+  } catch (error) {
+    console.error('Error saving file mappings:', error);
+  }
+}
+
+app.post('/api/automations/sync', async (req: Request, res: Response) => {
+  const { automations } = req.body;
+  globalAutomations = automations || [];
+  
+  const mappings = loadFileMappings();
+  
+  for (const tab of automations) {
+    for (const automation of tab.automations) {
+      if (automation.googleFileId) {
+        mappings.automations[automation.id] = {
+          googleFileId: automation.googleFileId,
+          googleFileName: automation.googleFileName,
+          storeTo: automation.storeTo
+        };
+      }
+    }
+  }
+  
+  saveFileMappings(mappings);
+  
+  res.json({ success: true });
+});
+
+app.get('/api/automations', async (req: Request, res: Response) => {
+  res.json({ automations: globalAutomations });
+});
+
+app.get('/api/google-token', async (req: Request, res: Response) => {
   try {
     if (!req.session?.userId) {
       return res.status(401).json({ error: 'Not authenticated' });
     }
 
-    const { title, url, content, targetFile, scrollPercentage } = req.body;
+    const tokens = await tokenStorage.getTokens(req.session.userId);
+    if (!tokens) {
+      return res.status(401).json({ error: 'No tokens found' });
+    }
+
+    res.json({ accessToken: tokens.access_token });
+  } catch (error) {
+    console.error('Token fetch error:', error);
+    res.status(500).json({ error: 'Failed to get token' });
+  }
+});
+
+app.post('/api/create-drive-file', async (req: Request, res: Response) => {
+  try {
+    if (!req.session?.userId) {
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
+
+    const { name, mimeType } = req.body;
     
-    if (!title || !content || !targetFile) {
+    if (!name) {
+      return res.status(400).json({ error: 'File name is required' });
+    }
+
+    mcpServerService.setCurrentUser(req.session.userId);
+    
+    const result = await mcpServerService.createFile(
+      name,
+      '',
+      mimeType || 'text/plain'
+    );
+
+    res.json({ 
+      success: true, 
+      fileId: result.id,
+      fileName: result.name
+    });
+  } catch (error) {
+    console.error('File creation error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    res.status(500).json({ error: errorMessage });
+  }
+});
+
+app.post('/api/log-automation', async (req: Request, res: Response) => {
+  try {
+    if (!req.session?.userId) {
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
+
+    const { automation, url, data, timestamp } = req.body;
+    
+    if (!automation || !data) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    const auth = await googleAuthService.getAuthenticatedClient(req.session.userId);
+    const webContent = {
+      title: data.pageTitle || 'Extracted Data',
+      url: url || data.pageUrl || 'Unknown URL',
+      content: JSON.stringify(data, null, 2),
+      timestamp: timestamp || new Date().toISOString()
+    };
+
+    const result = await gptService.processWebContent(
+      req.session.userId,
+      webContent,
+      automation
+    );
+
+    res.json({ 
+      success: result.success,
+      message: result.message,
+      details: result.details
+    });
+  } catch (error) {
+    console.error('Automation logging error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    res.status(500).json({ error: errorMessage });
+  }
+});
+
+
+app.post('/api/process-content', async (req: Request, res: Response) => {
+  try {
+    const { content, extractionType, automation } = req.body;
     
-    const formatAnalysis = await googleDriveService.analyzeFileFormat(auth, targetFile);
+    if (!content || !automation) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    let textContent = '';
     
-    if (formatAnalysis.fileType === 'sheet' && formatAnalysis.sheetFormat) {
-      const sheetFormat = formatAnalysis.sheetFormat;
-      
-      const extractedData = await gptService.extractForSheet(
-        title,
-        url,
-        content,
-        scrollPercentage || 100,
-        sheetFormat
-      );
-      
-      const drive = google.drive({ version: 'v3', auth });
-      const searchResponse = await drive.files.list({
-        q: `name = '${targetFile.replace(/'/g, "\\'")}' and trashed = false`,
-        pageSize: 1,
-        fields: 'files(id)'
-      });
-      
-      if (searchResponse.data.files && searchResponse.data.files.length > 0) {
-        const fileId = searchResponse.data.files[0].id!;
-        await googleDriveService.appendToSheet(auth, fileId, extractedData);
-        
-        res.json({ 
-          success: true,
-          fileType: 'sheet',
-          extractedData,
-          message: 'Data added to sheet'
-        });
-      } else {
-        res.status(404).json({ error: 'Sheet not found' });
-      }
-    } else if (formatAnalysis.fileType === 'doc' && formatAnalysis.docFormat) {
-      const docFormat = formatAnalysis.docFormat;
-      
-      let summary: string;
-      if (formatAnalysis.isEmpty) {
-        const summaryPrompt = `Please provide a concise summary of the following article content. The user has read ${Math.round(scrollPercentage || 100)}% of this article.
-
-Title: ${title}
-URL: ${url}
-
-Content:
-${content}
-
-Provide a clear, structured summary that captures the key points and main ideas.`;
-
-        summary = await gptService.summarizeArticle(req.session.userId, summaryPrompt);
-        
-        const timestamp = new Date().toISOString();
-        summary = `========================================
-Date: ${timestamp}
-Title: ${title}
-URL: ${url}
-Read: ${Math.round(scrollPercentage || 100)}%
-
-Summary:
-${summary}
-========================================`;
-      } else {
-        summary = await gptService.summarizeForDoc(
-          title,
-          url,
-          content,
-          scrollPercentage || 100,
-          docFormat
-        );
-      }
-      
-      const drive = google.drive({ version: 'v3', auth });
-      const searchResponse = await drive.files.list({
-        q: `name = '${targetFile.replace(/'/g, "\\'")}' and trashed = false`,
-        pageSize: 1,
-        fields: 'files(id)'
-      });
-      
-      if (searchResponse.data.files && searchResponse.data.files.length > 0) {
-        const fileId = searchResponse.data.files[0].id!;
-        await googleDriveService.appendToDoc(auth, fileId, summary);
-        
-        res.json({ 
-          success: true,
-          fileType: 'doc',
-          summary,
-          message: 'Summary added to document'
-        });
-      } else {
-        res.status(404).json({ error: 'Document not found' });
-      }
-    } else {
-      const summaryPrompt = `Please provide a concise summary of the following article content. The user has read ${Math.round(scrollPercentage || 100)}% of this article.
-
-Title: ${title}
-URL: ${url}
-
-Content:
-${content}
-
-Provide a clear, structured summary that captures the key points and main ideas.`;
-
-      const summary = await gptService.summarizeArticle(req.session.userId, summaryPrompt);
-      
-      const timestamp = new Date().toISOString();
-      const formattedEntry = `
-========================================
-Date: ${timestamp}
-Title: ${title}
-URL: ${url}
-Read: ${Math.round(scrollPercentage || 100)}%
-
-Summary:
-${summary}
-========================================
-`;
-
-      const result = await googleDriveService.appendToFile(auth, targetFile, formattedEntry);
-      
-      res.json({ 
-        success: true,
-        fileType: 'text',
-        summary,
-        file: result
+    if (extractionType === 'viewed') {
+      textContent = content.viewedElements
+        .map((el: any) => el.text)
+        .join('\n\n');
+    } else if (extractionType === 'readability') {
+      textContent = content.textContent || content.htmlContent;
+    }
+    
+    console.log('\n========================================');
+    console.log('PROCESSING CONTENT');
+    console.log('========================================');
+    console.log('URL:', content.url);
+    console.log('Title:', content.title);
+    console.log('Extraction Type:', extractionType);
+    console.log('Automation:', automation.title);
+    console.log('Extracted Content Length:', textContent.length);
+    console.log('Extracted Content Preview:');
+    console.log(textContent.substring(0, 500));
+    console.log('...\n');
+    
+    if (!req.session?.userId) {
+      console.log('⚠️  User not authenticated - skipping Google Drive write');
+      console.log('========================================\n');
+      return res.json({
+        url: content.url,
+        title: content.title,
+        timestamp: content.timestamp || new Date().toISOString(),
+        stored: false,
+        message: 'Content not stored. Please authenticate with Google Drive.'
       });
     }
+
+    const webContent = {
+      title: content.title,
+      url: content.url,
+      content: textContent,
+      timestamp: content.timestamp || new Date().toISOString()
+    };
+
+    const result = await gptService.processWebContent(
+      req.session.userId,
+      webContent,
+      automation
+    );
+
+    res.json({
+      relevant: true,
+      stored: result.success,
+      message: result.message,
+      details: result.details,
+      url: content.url,
+      title: content.title,
+      extractedFields: automation.extract,
+      storageType: automation.storeTo,
+      storageLocation: automation.googleFileName || automation.storeTo
+    });
+    
   } catch (error) {
-    console.error('Article summarization error:', error);
+    console.error('Content processing error:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     res.status(500).json({ error: errorMessage });
   }
